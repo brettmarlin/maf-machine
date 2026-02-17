@@ -17,23 +17,110 @@ interface StravaTokenResponse {
   };
 }
 
-// Generate a random session ID
+interface StoredTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+}
+
+interface StravaActivity {
+  id: number;
+  name: string;
+  type: string;
+  sport_type: string;
+  start_date: string;
+  elapsed_time: number;
+  distance: number;
+  average_heartrate?: number;
+  average_cadence?: number;
+  total_elevation_gain: number;
+  average_speed: number;
+}
+
+// --- Helpers ---
+
 function generateSessionId(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Get the base URL for redirects (handles local dev vs production)
 function getBaseUrl(request: Request): string {
   const url = new URL(request.url);
-  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-    return `${url.protocol}//${url.host}`;
-  }
-  // In production, the Worker runs on a different domain than Pages
-  // We'll update this when we deploy
   return `${url.protocol}//${url.host}`;
 }
+
+function getAthleteIdFromCookie(request: Request): string | null {
+  const cookie = request.headers.get('Cookie') || '';
+  const match = cookie.match(/maf_session=([a-f0-9]+)/);
+  return match ? match[1] : null;
+}
+
+// Resolve session cookie → athlete ID
+async function resolveSession(request: Request, env: Env): Promise<string | null> {
+  const sessionId = getAthleteIdFromCookie(request);
+  if (!sessionId) return null;
+  return await env.MAF_TOKENS.get(`session:${sessionId}`);
+}
+
+// Get a valid access token, refreshing if expired
+async function getValidToken(athleteId: string, env: Env): Promise<string | null> {
+  const raw = await env.MAF_TOKENS.get(athleteId);
+  if (!raw) return null;
+
+  const tokens: StoredTokens = JSON.parse(raw);
+  const now = Math.floor(Date.now() / 1000);
+
+  // If token is still valid (with 60s buffer), return it
+  if (tokens.expires_at > now + 60) {
+    return tokens.access_token;
+  }
+
+  // Refresh the token
+  const response = await fetch('https://www.strava.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: env.STRAVA_CLIENT_ID,
+      client_secret: env.STRAVA_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refresh_token,
+    }),
+  });
+
+  if (!response.ok) return null;
+
+  const data: StoredTokens = await response.json();
+  await env.MAF_TOKENS.put(
+    athleteId,
+    JSON.stringify({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: data.expires_at,
+    })
+  );
+
+  return data.access_token;
+}
+
+// JSON response helper
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+// Auth guard — returns athleteId or an error Response
+async function requireAuth(request: Request, env: Env): Promise<string | Response> {
+  const athleteId = await resolveSession(request, env);
+  if (!athleteId) {
+    return json({ error: 'Not authenticated' }, 401);
+  }
+  return athleteId;
+}
+
+// --- Main Handler ---
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -41,9 +128,7 @@ export default {
 
     // --- Health Check ---
     if (url.pathname === '/api/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ status: 'ok' });
     }
 
     // --- OAuth: Redirect to Strava ---
@@ -66,12 +151,9 @@ export default {
       const error = url.searchParams.get('error');
 
       if (error || !code) {
-        return new Response(`OAuth error: ${error || 'no code received'}`, {
-          status: 400,
-        });
+        return new Response(`OAuth error: ${error || 'no code received'}`, { status: 400 });
       }
 
-      // Exchange code for tokens
       const baseUrl = getBaseUrl(request);
       const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
         method: 'POST',
@@ -92,7 +174,6 @@ export default {
       const data: StravaTokenResponse = await tokenResponse.json();
       const athleteId = data.athlete.id.toString();
 
-      // Store tokens in KV
       await env.MAF_TOKENS.put(
         athleteId,
         JSON.stringify({
@@ -102,16 +183,15 @@ export default {
         })
       );
 
-      // Create a session: map sessionId → athleteId (expires in 7 days)
       const sessionId = generateSessionId();
       await env.MAF_TOKENS.put(`session:${sessionId}`, athleteId, {
         expirationTtl: 60 * 60 * 24 * 7,
       });
 
-      // Redirect to frontend with session cookie
-      const frontendUrl = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
-        ? 'http://localhost:5173'
-        : baseUrl;
+      const frontendUrl =
+        url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+          ? 'http://localhost:5173'
+          : baseUrl;
 
       return new Response(null, {
         status: 302,
@@ -122,45 +202,148 @@ export default {
       });
     }
 
-    // --- Session Check: Get current user ---
+    // --- Auth: Check Session ---
     if (url.pathname === '/api/auth/me') {
-      const cookie = request.headers.get('Cookie') || '';
-      const match = cookie.match(/maf_session=([a-f0-9]+)/);
-
-      if (!match) {
-        return new Response(JSON.stringify({ authenticated: false }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      const athleteId = await env.MAF_TOKENS.get(`session:${match[1]}`);
+      const athleteId = await resolveSession(request, env);
       if (!athleteId) {
-        return new Response(JSON.stringify({ authenticated: false }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json({ authenticated: false });
       }
-
-      return new Response(
-        JSON.stringify({ authenticated: true, athleteId }),
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      return json({ authenticated: true, athleteId });
     }
 
-    // --- Logout ---
+    // --- Auth: Logout ---
     if (url.pathname === '/api/auth/logout') {
-      const cookie = request.headers.get('Cookie') || '';
-      const match = cookie.match(/maf_session=([a-f0-9]+)/);
-
-      if (match) {
-        await env.MAF_TOKENS.delete(`session:${match[1]}`);
+      const sessionId = getAthleteIdFromCookie(request);
+      if (sessionId) {
+        await env.MAF_TOKENS.delete(`session:${sessionId}`);
       }
-
       return new Response(JSON.stringify({ ok: true }), {
         headers: {
           'Content-Type': 'application/json',
           'Set-Cookie': 'maf_session=; Path=/; HttpOnly; Max-Age=0',
         },
       });
+    }
+
+    // --- Fetch Activities ---
+    if (url.pathname === '/api/activities' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const token = await getValidToken(athleteId, env);
+      if (!token) return json({ error: 'Token expired, please re-authenticate' }, 401);
+
+      // Check cache for existing activities
+      const cacheKey = `${athleteId}:activities`;
+      const cached = await env.MAF_ACTIVITIES.get(cacheKey);
+      let existingActivities: StravaActivity[] = cached ? JSON.parse(cached) : [];
+
+      // Find the most recent activity timestamp to only fetch new ones
+      let after: number | undefined;
+      if (existingActivities.length > 0) {
+        const latest = existingActivities.reduce((max, a) =>
+          new Date(a.start_date) > new Date(max.start_date) ? a : max
+        );
+        after = Math.floor(new Date(latest.start_date).getTime() / 1000);
+      } else {
+        // First sync: fetch last 6 months
+        after = Math.floor((Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) / 1000);
+      }
+
+      // Fetch from Strava (paginated)
+      let page = 1;
+      let newActivities: StravaActivity[] = [];
+      let hasMore = true;
+
+      while (hasMore) {
+        const apiUrl = new URL('https://www.strava.com/api/v3/athlete/activities');
+        apiUrl.searchParams.set('after', after!.toString());
+        apiUrl.searchParams.set('page', page.toString());
+        apiUrl.searchParams.set('per_page', '100');
+
+        const res = await fetch(apiUrl.toString(), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          return json({ error: `Strava API error: ${err}` }, res.status);
+        }
+
+        const batch: StravaActivity[] = await res.json();
+
+        // Filter to runs only
+        const runs = batch.filter(
+          (a) => a.type === 'Run' || a.sport_type === 'Run'
+        );
+        newActivities = newActivities.concat(runs);
+
+        if (batch.length < 100) {
+          hasMore = false;
+        } else {
+          page++;
+          // Safety valve: max 5 pages per sync (500 activities)
+          if (page > 5) hasMore = false;
+        }
+      }
+
+      // Merge and deduplicate
+      const allActivities = [...existingActivities, ...newActivities];
+      const deduped = Array.from(
+        new Map(allActivities.map((a) => [a.id, a])).values()
+      );
+
+      // Sort by date descending
+      deduped.sort(
+        (a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+      );
+
+      // Cache in KV
+      await env.MAF_ACTIVITIES.put(cacheKey, JSON.stringify(deduped));
+
+      return json({
+        activities: deduped,
+        total: deduped.length,
+        new_fetched: newActivities.length,
+      });
+    }
+
+    // --- Fetch Activity Streams ---
+    const streamsMatch = url.pathname.match(/^\/api\/activities\/(\d+)\/streams$/);
+    if (streamsMatch && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const activityId = streamsMatch[1];
+      const token = await getValidToken(athleteId, env);
+      if (!token) return json({ error: 'Token expired, please re-authenticate' }, 401);
+
+      // Check cache first
+      const streamCacheKey = `${athleteId}:stream:${activityId}`;
+      const cachedStream = await env.MAF_ACTIVITIES.get(streamCacheKey);
+      if (cachedStream) {
+        return json(JSON.parse(cachedStream));
+      }
+
+      // Fetch from Strava
+      const streamUrl = `https://www.strava.com/api/v3/activities/${activityId}/streams?keys=heartrate,cadence,velocity_smooth,time,distance,altitude&key_by_type=true`;
+      const res = await fetch(streamUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        return json({ error: `Stream fetch failed: ${err}` }, res.status);
+      }
+
+      const streams = await res.json();
+
+      // Cache the streams
+      await env.MAF_ACTIVITIES.put(streamCacheKey, JSON.stringify(streams));
+
+      return json(streams);
     }
 
     return new Response('Not Found', { status: 404 });
