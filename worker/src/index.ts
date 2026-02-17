@@ -345,7 +345,53 @@ export default {
 
       return json(streams);
     }
+// --- Settings: Get ---
+if (url.pathname === '/api/settings' && request.method === 'GET') {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+  const athleteId = auth;
 
+  const raw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
+  if (!raw) {
+    return json({ configured: false });
+  }
+  return json({ configured: true, ...JSON.parse(raw) });
+}
+
+// --- Settings: Save ---
+if (url.pathname === '/api/settings' && request.method === 'PUT') {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+  const athleteId = auth;
+
+  const body = await request.json() as {
+    age: number;
+    modifier: number;
+    units: 'km' | 'mi';
+  };
+
+  // Validate
+  if (!body.age || body.age < 10 || body.age > 100) {
+    return json({ error: 'Invalid age' }, 400);
+  }
+  if (![- 10, -5, 0, 5].includes(body.modifier)) {
+    return json({ error: 'Invalid modifier' }, 400);
+  }
+
+  const mafHr = 180 - body.age + body.modifier;
+  const settings = {
+    age: body.age,
+    modifier: body.modifier,
+    units: body.units || 'km',
+    maf_hr: mafHr,
+    maf_zone_low: mafHr - 5,
+    maf_zone_high: mafHr + 5,
+  };
+
+  await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
+
+  return json({ configured: true, ...settings });
+}
     return new Response('Not Found', { status: 404 });
   },
 };
