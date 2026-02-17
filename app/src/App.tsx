@@ -1,35 +1,59 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState, useEffect } from 'react'
+import { Login } from './components/Login'
+import { Onboarding } from './components/Onboarding'
+import { Dashboard } from './components/Dashboard'
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+interface Settings {
+  configured: boolean
+  age?: number
+  modifier?: number
+  units?: 'km' | 'mi'
+  maf_hr?: number
+  maf_zone_low?: number
+  maf_zone_high?: number
 }
 
-export default App
+export default function App() {
+  const [auth, setAuth] = useState<{ authenticated: boolean; athleteId?: string } | null>(null)
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me')
+        const data = await res.json()
+        setAuth(data)
+
+        if (data.authenticated) {
+          const settingsRes = await fetch('/api/settings')
+          const settingsData = await settingsRes.json()
+          setSettings(settingsData)
+        }
+      } catch {
+        setAuth({ authenticated: false })
+      } finally {
+        setLoading(false)
+      }
+    }
+    checkAuth()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    )
+  }
+
+  if (!auth?.authenticated) {
+    return <Login />
+  }
+
+  if (!settings?.configured) {
+    return <Onboarding onComplete={(s) => setSettings(s)} />
+  }
+
+  return <Dashboard settings={settings} />
+}
