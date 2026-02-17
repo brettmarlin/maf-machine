@@ -1,16 +1,5 @@
 import { useState } from 'react'
-
-interface Settings {
-  configured: boolean
-  age?: number
-  modifier?: number
-  units?: 'km' | 'mi'
-  maf_hr?: number
-  maf_zone_low?: number
-  maf_zone_high?: number
-  qualifying_tolerance?: number
-  start_date?: string | null
-}
+import type { Settings } from '../App'
 
 const MODIFIERS = [
   { value: -10, label: '-10: Recovering from illness/surgery or on regular medication' },
@@ -19,19 +8,24 @@ const MODIFIERS = [
   { value: 5, label: '+5: Training 2+ years with no issues and improving' },
 ]
 
-export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Settings) => void; initialValues?: { age?: number; modifier?: number; units?: 'km' | 'mi'; qualifying_tolerance?: number; start_date?: string | null } }) {
-  const [age, setAge] = useState<number>(initialValues?.age ?? 30)
-  const [modifier, setModifier] = useState<number>(initialValues?.modifier ?? 0)
-  const [units, setUnits] = useState<'km' | 'mi'>(initialValues?.units ?? 'mi')
-  const [tolerance, setTolerance] = useState<number>(initialValues?.qualifying_tolerance ?? 10)
-  const [startDate, setStartDate] = useState<string>(initialValues?.start_date ?? '')
+interface Props {
+  settings: Settings
+  onSave: (s: Settings) => void
+  onClose: () => void
+}
+
+export function SettingsPanel({ settings, onSave, onClose }: Props) {
+  const [age, setAge] = useState(settings.age || 50)
+  const [modifier, setModifier] = useState(settings.modifier ?? -5)
+  const [units, setUnits] = useState<'km' | 'mi'>(settings.units || 'mi')
+  const [startDate, setStartDate] = useState(settings.start_date || '')
+  const [tolerance, setTolerance] = useState(settings.qualifying_tolerance ?? 10)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const mafHr = 180 - age + modifier
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSave() {
     setSaving(true)
     setError(null)
 
@@ -39,16 +33,22 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ age, modifier, units, qualifying_tolerance: tolerance, start_date: startDate || null }),
+        body: JSON.stringify({
+          age,
+          modifier,
+          units,
+          start_date: startDate || null,
+          qualifying_tolerance: tolerance,
+        }),
       })
 
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || 'Failed to save settings')
+        throw new Error(data.error || 'Failed to save')
       }
 
       const data = await res.json()
-      onComplete(data)
+      onSave(data)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -57,11 +57,11 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
-      <form onSubmit={handleSubmit} className="max-w-lg w-full space-y-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold">Set Up Your Profile</h1>
-          <p className="text-gray-400">We need a few details to calculate your MAF heart rate zone.</p>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-lg w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold">Settings</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-lg">✕</button>
         </div>
 
         {/* Age */}
@@ -86,9 +86,7 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
           >
             {MODIFIERS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
+              <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>
         </div>
@@ -101,9 +99,7 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
               type="button"
               onClick={() => setUnits('mi')}
               className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
-                units === 'mi'
-                  ? 'bg-orange-500 text-white'
-                  : 'bg-gray-800 text-gray-400 border border-gray-700'
+                units === 'mi' ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700'
               }`}
             >
               Miles
@@ -112,9 +108,7 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
               type="button"
               onClick={() => setUnits('km')}
               className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
-                units === 'km'
-                  ? 'bg-orange-500 text-white'
-                  : 'bg-gray-800 text-gray-400 border border-gray-700'
+                units === 'km' ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700'
               }`}
             >
               Kilometers
@@ -122,10 +116,10 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
           </div>
         </div>
 
-        {/* MAF Start Date */}
+        {/* Start Date */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-300">MAF Training Start Date</label>
-          <p className="text-xs text-gray-500">Only runs after this date will appear on your dashboard.</p>
+          <p className="text-xs text-gray-500">Only runs after this date appear on your dashboard.</p>
           <input
             type="date"
             value={startDate}
@@ -137,10 +131,10 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
         {/* Qualifying Tolerance */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-300">
-            Qualifying Tolerance: +{tolerance} bpm above MAF zone
+            Qualifying Tolerance: +{tolerance} bpm
           </label>
           <p className="text-xs text-gray-500">
-            Widens the qualifying zone to include runs as you work toward your MAF target. Tighten as you improve.
+            Widens the qualifying zone above MAF. Tighten as you improve.
           </p>
           <input
             type="range"
@@ -157,24 +151,32 @@ export function Onboarding({ onComplete, initialValues }: { onComplete: (s: Sett
           </div>
         </div>
 
-        {/* MAF HR Preview */}
+        {/* Preview */}
         <div className="bg-gray-800 rounded-lg p-4 text-center space-y-1">
-          <p className="text-sm text-gray-400">Your MAF Heart Rate</p>
-          <p className="text-3xl font-bold text-orange-500">{mafHr} bpm</p>
+          <p className="text-sm text-gray-400">MAF Heart Rate</p>
+          <p className="text-2xl font-bold text-orange-500">{mafHr} bpm</p>
           <p className="text-sm text-gray-400">MAF Zone: {mafHr - 5} – {mafHr + 5} bpm</p>
-          <p className="text-sm text-gray-500">Qualifying Zone: {mafHr - 5} – {mafHr + 5 + tolerance} bpm</p>
+          <p className="text-sm text-gray-500">Qualifying: {mafHr - 5} – {mafHr + 5 + tolerance} bpm</p>
         </div>
 
         {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors"
-        >
-          {saving ? 'Saving...' : 'Save & Start Syncing'}
-        </button>
-      </form>
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2.5 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors"
+          >
+            {saving ? 'Saving...' : 'Save & Re-sync'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

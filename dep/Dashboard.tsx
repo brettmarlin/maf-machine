@@ -22,11 +22,11 @@ interface Settings {
   maf_hr?: number
   maf_zone_low?: number
   maf_zone_high?: number
-  qualifying_tolerance?: number
-  start_date?: string | null
 }
 
-export function Dashboard({ settings, onOpenSettings }: { settings: Settings; onOpenSettings: () => void }) {
+const QUALIFYING_TOLERANCE = 10 // bpm above maf_zone_high
+
+export function Dashboard({ settings }: { settings: Settings }) {
   const [activities, setActivities] = useState<MAFActivity[]>([])
   const [trends, setTrends] = useState<MAFTrend[]>([])
   const [summary, setSummary] = useState<MAFSummary | null>(null)
@@ -38,9 +38,7 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
   const mafHr = settings.maf_hr || 130
   const mafZoneLow = settings.maf_zone_low || 125
   const mafZoneHigh = settings.maf_zone_high || 135
-  const qualifyingTolerance = settings.qualifying_tolerance ?? 10
-  const qualifyingHigh = mafZoneHigh + qualifyingTolerance
-  const startDate = settings.start_date || null
+  const qualifyingHigh = mafZoneHigh + QUALIFYING_TOLERANCE
 
   async function syncActivities() {
     setSyncing(true)
@@ -53,13 +51,7 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
       const data = await res.json()
 
       const rawActivities = data.activities || []
-
-      // Filter by MAF training start date
-      const filtered = startDate
-        ? rawActivities.filter((a: any) => new Date(a.start_date) >= new Date(startDate))
-        : rawActivities
-
-      setSyncStatus(`Processing ${filtered.length} runs...`)
+      setSyncStatus(`Processing ${rawActivities.length} runs...`)
 
       // Load exclusions from localStorage
       const excludedIds: Set<number> = new Set(
@@ -68,9 +60,9 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
 
       const analyzed: MAFActivity[] = []
 
-      for (let i = 0; i < filtered.length; i++) {
-        const activity = filtered[i]
-        setSyncStatus(`Analyzing run ${i + 1} of ${filtered.length}...`)
+      for (let i = 0; i < rawActivities.length; i++) {
+        const activity = rawActivities[i]
+        setSyncStatus(`Analyzing run ${i + 1} of ${rawActivities.length}...`)
 
         let streams = null
         try {
@@ -89,7 +81,7 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
             mafHr,
             mafZoneLow,
             mafZoneHigh,
-            qualifyingTolerance,
+            QUALIFYING_TOLERANCE,
             units,
             excludedIds.has(activity.id)
           )
@@ -141,11 +133,7 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
     const cached = localStorage.getItem('maf_activities')
     if (cached) {
       try {
-        let parsed: MAFActivity[] = JSON.parse(cached)
-        // Apply start date filter to cached data too
-        if (startDate) {
-          parsed = parsed.filter((a) => new Date(a.date) >= new Date(startDate))
-        }
+        const parsed: MAFActivity[] = JSON.parse(cached)
         setActivities(parsed)
         setTrends(computeTrends(parsed))
         setSummary(computeSummary(parsed))
@@ -160,50 +148,29 @@ export function Dashboard({ settings, onOpenSettings }: { settings: Settings; on
     <div className="min-h-screen bg-gray-950 text-white p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">MAF Machine</h1>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-400">
-                MAF HR: <span className="text-red-400 font-medium">{mafHr}</span> bpm
-                <span className="text-gray-600 ml-1">
-                  ({mafZoneLow}–{mafZoneHigh}, qual: {qualifyingHigh})
-                </span>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">MAF Machine</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-400">
+              MAF HR: <span className="text-red-400 font-medium">{mafHr}</span> bpm
+              <span className="text-gray-600 ml-1">
+                ({mafZoneLow}–{mafZoneHigh}, qual: {qualifyingHigh})
               </span>
-              <button
-                onClick={onOpenSettings}
-                className="text-sm bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors"
-              >
-                Settings
-              </button>
-              <button
-                onClick={syncActivities}
-                disabled={syncing}
-                className="text-sm bg-gray-800 hover:bg-gray-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
-              >
-                {syncing ? 'Syncing...' : 'Sync'}
-              </button>
-              <a
-                href="/api/auth/logout"
-                className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                Logout
-              </a>
-            </div>
+            </span>
+            <button
+              onClick={syncActivities}
+              disabled={syncing}
+              className="text-sm bg-gray-800 hover:bg-gray-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+            <a
+              href="/api/auth/logout"
+              className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Logout
+            </a>
           </div>
-          {startDate && (
-            <p className="text-xs text-gray-500">
-              Tracking since{' '}
-              <span className="text-gray-400 font-medium">
-                {new Date(startDate + 'T00:00:00').toLocaleDateString('en-US', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </span>
-              {' · '}{activities.filter((a) => !a.excluded).length} runs
-            </p>
-          )}
         </div>
 
         {/* Sync Status */}

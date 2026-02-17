@@ -11,12 +11,15 @@ interface Settings {
   maf_hr?: number
   maf_zone_low?: number
   maf_zone_high?: number
+  qualifying_tolerance?: number
+  start_date?: string | null
 }
 
 export default function App() {
   const [auth, setAuth] = useState<{ authenticated: boolean; athleteId?: string } | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
     async function checkAuth() {
@@ -51,9 +54,17 @@ export default function App() {
     return <Login />
   }
 
-  if (!settings?.configured) {
-    return <Onboarding onComplete={(s) => setSettings(s)} />
+  if (!settings?.configured || showSettings) {
+    return (
+      <Onboarding
+        onComplete={(s) => {
+          setSettings(s)
+          setShowSettings(false)
+        }}
+        initialValues={settings?.configured ? settings : undefined}
+      />
+    )
   }
 
-  return <Dashboard settings={settings} />
+  return <Dashboard settings={settings} onOpenSettings={() => setShowSettings(true)} />
 }

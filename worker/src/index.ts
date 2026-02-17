@@ -368,17 +368,20 @@ if (url.pathname === '/api/settings' && request.method === 'PUT') {
     age: number;
     modifier: number;
     units: 'km' | 'mi';
+    start_date?: string;
+    qualifying_tolerance?: number;
   };
 
   // Validate
   if (!body.age || body.age < 10 || body.age > 100) {
     return json({ error: 'Invalid age' }, 400);
   }
-  if (![- 10, -5, 0, 5].includes(body.modifier)) {
+  if (![-10, -5, 0, 5].includes(body.modifier)) {
     return json({ error: 'Invalid modifier' }, 400);
   }
 
   const mafHr = 180 - body.age + body.modifier;
+  const tolerance = body.qualifying_tolerance !== undefined ? body.qualifying_tolerance : 10;
   const settings = {
     age: body.age,
     modifier: body.modifier,
@@ -386,12 +389,45 @@ if (url.pathname === '/api/settings' && request.method === 'PUT') {
     maf_hr: mafHr,
     maf_zone_low: mafHr - 5,
     maf_zone_high: mafHr + 5,
+    qualifying_tolerance: tolerance,
+    start_date: body.start_date || null,
   };
 
   await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
 
   return json({ configured: true, ...settings });
-}
+  }
+
+    // --- Exclude/Include a run ---
+    if (url.pathname === '/api/exclusions' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const raw = await env.MAF_SETTINGS.get(`${athleteId}:exclusions`);
+      return json(raw ? JSON.parse(raw) : []);
+    }
+
+    if (url.pathname === '/api/exclusions' && request.method === 'PUT') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const body = await request.json() as { activity_id: number; excluded: boolean };
+      const raw = await env.MAF_SETTINGS.get(`${athleteId}:exclusions`);
+      const exclusions: number[] = raw ? JSON.parse(raw) : [];
+
+      if (body.excluded && !exclusions.includes(body.activity_id)) {
+        exclusions.push(body.activity_id);
+      } else if (!body.excluded) {
+        const idx = exclusions.indexOf(body.activity_id);
+        if (idx !== -1) exclusions.splice(idx, 1);
+      }
+
+      await env.MAF_SETTINGS.put(`${athleteId}:exclusions`, JSON.stringify(exclusions));
+      return json(exclusions);
+    }
+
     return new Response('Not Found', { status: 404 });
   },
 };
