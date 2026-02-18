@@ -1,18 +1,30 @@
-name = "maf-machine-api"
+name = "maf-machine"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
+workers_dev = false
 
+# Route on maf.marliin.com subdomain
+routes = [
+  { pattern = "maf.marliin.com/*", zone_name = "marliin.com" }
+]
+
+# Static assets from Vite build
+[assets]
+directory = "../app/dist"
+binding = "ASSETS"
+
+# Production KV namespaces
 [[kv_namespaces]]
 binding = "MAF_TOKENS"
-id = "PLACEHOLDER"
-preview_id = "PLACEHOLDER"
+id = "7fb555c0c26842ec8c43966c7bd4998a"
+preview_id = "eadad87860a24db297e36d810cccfa94"
 
 [[kv_namespaces]]
 binding = "MAF_ACTIVITIES"
-id = "PLACEHOLDER"
-preview_id = "PLACEHOLDER"
+id = "fba9b72e54e74bd492c3c75902c5749b"
+preview_id = "6b88824b06b548899d517d70739faa23"
 
 [[kv_namespaces]]
 binding = "MAF_SETTINGS"
-id = "PLACEHOLDER"
-preview_id = "PLACEHOLDER"
+id = "08b7ce8af969418595856f61fb42c6c6"
+preview_id = "d0d1c96a7b834c0490728d705f57c533"

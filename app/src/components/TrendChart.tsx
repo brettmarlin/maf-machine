@@ -15,15 +15,6 @@ import type { MAFTrend } from '../lib/mafAnalysis'
 import { formatPace } from '../lib/mafAnalysis'
 
 type Overlay = 'pace' | 'ef' | 'cadence'
-type TimeRange = '4w' | '3m' | '6m' | '1y' | 'all'
-
-const TIME_RANGES: { key: TimeRange; label: string; days: number }[] = [
-  { key: '4w', label: '4W', days: 28 },
-  { key: '3m', label: '3M', days: 90 },
-  { key: '6m', label: '6M', days: 180 },
-  { key: '1y', label: '1Y', days: 365 },
-  { key: 'all', label: 'All', days: 99999 },
-]
 
 const OVERLAY_CONFIG: { key: Overlay; label: string; color: string; activeColor: string }[] = [
   { key: 'pace', label: 'Pace', color: 'bg-gray-800 text-gray-400', activeColor: 'bg-orange-600 text-white' },
@@ -42,7 +33,6 @@ interface Props {
 
 export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qualifyingHigh }: Props) {
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set())
-  const [timeRange, setTimeRange] = useState<TimeRange>('3m')
   const [showRolling, setShowRolling] = useState(true)
 
   const toggleOverlay = (overlay: Overlay) => {
@@ -52,30 +42,23 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
     setOverlays(next)
   }
 
-  // Filter by time range
-  const cutoff = Date.now() - TIME_RANGES.find((t) => t.key === timeRange)!.days * 24 * 60 * 60 * 1000
-  const filtered = trends.filter((t) => new Date(t.date).getTime() >= cutoff)
-
-  // Chart data
-  const chartData = filtered.map((t) => ({
+  // Chart data — trends are already filtered by date range in Dashboard
+  const chartData = trends.map((t) => ({
     date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     rawDate: t.date,
-    // Primary: HR
     avgHr: t.avgHr,
     rollingHr: t.rollingHr,
-    // Overlays
     mafPace: t.mafPace,
     rollingMafPace: t.rollingMafPace,
     ef: t.ef,
     rollingEf: t.rollingEf,
     cadence: t.cadence,
     rollingCadence: t.rollingCadence,
-    // Context
     qualifying: t.qualifying,
     timeInZonePct: t.timeInZonePct,
   }))
 
-  // HR Y-axis domain: show enough range to include MAF zone + some breathing room
+  // HR Y-axis domain
   const allHr = chartData.map((d) => d.avgHr).filter(Boolean)
   const minHr = Math.min(...allHr, mafZoneLow - 5)
   const maxHr = Math.max(...allHr, qualifyingHigh + 5)
@@ -89,7 +72,6 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm shadow-lg">
         <p className="text-gray-400 mb-2 font-medium">{label}</p>
-        {/* Always show HR */}
         <p className="text-red-400">
           HR: <span className="font-semibold">{Math.round(data.avgHr)} bpm</span>
           {data.rollingHr && <span className="text-gray-500 ml-1">(avg: {Math.round(data.rollingHr)})</span>}
@@ -98,7 +80,6 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
           Zone: {data.timeInZonePct?.toFixed(0)}% in target
           {data.qualifying ? ' ✓' : ''}
         </p>
-        {/* Overlays */}
         {overlays.has('pace') && data.mafPace > 0 && (
           <p className="text-orange-400 mt-1">
             Pace: <span className="font-semibold">{formatPace(data.mafPace, units)}</span>
@@ -122,48 +103,32 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* HR is always on — shown as a label */}
-          <span className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white">
-            ♥ Heart Rate
-          </span>
-          <span className="text-xs text-gray-600">|</span>
-          {OVERLAY_CONFIG.map((o) => (
-            <button
-              key={o.key}
-              onClick={() => toggleOverlay(o.key)}
-              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                overlays.has(o.key) ? o.activeColor : o.color
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-          <span className="text-xs text-gray-600">|</span>
+      {/* Overlay Controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white">
+          ♥ Heart Rate
+        </span>
+        <span className="text-xs text-gray-600">|</span>
+        {OVERLAY_CONFIG.map((o) => (
           <button
-            onClick={() => setShowRolling(!showRolling)}
+            key={o.key}
+            onClick={() => toggleOverlay(o.key)}
             className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-              showRolling ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500'
+              overlays.has(o.key) ? o.activeColor : o.color
             }`}
           >
-            4wk Avg
+            {o.label}
           </button>
-        </div>
-        <div className="flex gap-1">
-          {TIME_RANGES.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTimeRange(t.key)}
-              className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
-                timeRange === t.key ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        ))}
+        <span className="text-xs text-gray-600">|</span>
+        <button
+          onClick={() => setShowRolling(!showRolling)}
+          className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+            showRolling ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500'
+          }`}
+        >
+          4wk Avg
+        </button>
       </div>
 
       {/* Chart */}
@@ -222,144 +187,47 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
             <Tooltip content={<CustomTooltip />} />
 
             {/* MAF Zone Band */}
-            <ReferenceArea
-              yAxisId="hr"
-              y1={mafZoneLow}
-              y2={mafZoneHigh}
-              fill="#22c55e"
-              fillOpacity={0.08}
-              stroke="none"
-            />
-
-            {/* Qualifying Zone Band (wider) */}
-            <ReferenceArea
-              yAxisId="hr"
-              y1={mafZoneHigh}
-              y2={qualifyingHigh}
-              fill="#eab308"
-              fillOpacity={0.04}
-              stroke="none"
-            />
+            <ReferenceArea yAxisId="hr" y1={mafZoneLow} y2={mafZoneHigh} fill="#22c55e" fillOpacity={0.08} stroke="none" />
+            <ReferenceArea yAxisId="hr" y1={mafZoneHigh} y2={qualifyingHigh} fill="#eab308" fillOpacity={0.04} stroke="none" />
 
             {/* MAF HR Target Line */}
             <ReferenceLine
-              yAxisId="hr"
-              y={mafHr}
-              stroke="#22c55e"
-              strokeDasharray="6 3"
-              strokeWidth={1.5}
+              yAxisId="hr" y={mafHr} stroke="#22c55e" strokeDasharray="6 3" strokeWidth={1.5}
               label={{ value: `MAF ${mafHr}`, fill: '#22c55e', fontSize: 10, position: 'left' }}
             />
+            <ReferenceLine yAxisId="hr" y={mafZoneLow} stroke="#22c55e" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.5} />
+            <ReferenceLine yAxisId="hr" y={mafZoneHigh} stroke="#22c55e" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.5} />
+            <ReferenceLine yAxisId="hr" y={qualifyingHigh} stroke="#eab308" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.3} />
 
-            {/* Zone boundaries */}
-            <ReferenceLine
-              yAxisId="hr"
-              y={mafZoneLow}
-              stroke="#22c55e"
-              strokeDasharray="2 4"
-              strokeWidth={0.5}
-              strokeOpacity={0.5}
-            />
-            <ReferenceLine
-              yAxisId="hr"
-              y={mafZoneHigh}
-              stroke="#22c55e"
-              strokeDasharray="2 4"
-              strokeWidth={0.5}
-              strokeOpacity={0.5}
-            />
-            <ReferenceLine
-              yAxisId="hr"
-              y={qualifyingHigh}
-              stroke="#eab308"
-              strokeDasharray="2 4"
-              strokeWidth={0.5}
-              strokeOpacity={0.3}
-            />
-
-            {/* === PRIMARY: Heart Rate === */}
-            <Scatter
-              yAxisId="hr"
-              dataKey="avgHr"
-              fill="#ef4444"
-              r={4}
-              fillOpacity={0.7}
-              name="Avg HR"
-            />
+            {/* Heart Rate */}
+            <Scatter yAxisId="hr" dataKey="avgHr" fill="#ef4444" r={4} fillOpacity={0.7} name="Avg HR" />
             {showRolling && (
-              <Line
-                yAxisId="hr"
-                dataKey="rollingHr"
-                stroke="#ef4444"
-                strokeWidth={2.5}
-                dot={false}
-                connectNulls
-                name="HR (4wk avg)"
-              />
+              <Line yAxisId="hr" dataKey="rollingHr" stroke="#ef4444" strokeWidth={2.5} dot={false} connectNulls name="HR (4wk avg)" />
             )}
 
-            {/* === OVERLAY: Pace === */}
+            {/* Pace overlay */}
             {overlays.has('pace') && (
               <>
-                <Scatter
-                  yAxisId="pace"
-                  dataKey="mafPace"
-                  fill="#f97316"
-                  r={3}
-                  fillOpacity={0.5}
-                  name="MAF Pace"
-                />
+                <Scatter yAxisId="pace" dataKey="mafPace" fill="#f97316" r={3} fillOpacity={0.5} name="MAF Pace" />
                 {showRolling && (
-                  <Line
-                    yAxisId="pace"
-                    dataKey="rollingMafPace"
-                    stroke="#f97316"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                    name="Pace (4wk avg)"
-                    strokeDasharray="4 2"
-                  />
+                  <Line yAxisId="pace" dataKey="rollingMafPace" stroke="#f97316" strokeWidth={2} dot={false} connectNulls name="Pace (4wk avg)" strokeDasharray="4 2" />
                 )}
               </>
             )}
 
-            {/* === OVERLAY: Efficiency Factor === */}
+            {/* EF overlay */}
             {overlays.has('ef') && (
               <>
-                <Scatter
-                  yAxisId={overlays.has('pace') ? 'pace' : 'ef'}
-                  dataKey="ef"
-                  fill="#3b82f6"
-                  r={3}
-                  fillOpacity={0.5}
-                  name="EF"
-                />
+                <Scatter yAxisId={overlays.has('pace') ? 'pace' : 'ef'} dataKey="ef" fill="#3b82f6" r={3} fillOpacity={0.5} name="EF" />
                 {showRolling && (
-                  <Line
-                    yAxisId={overlays.has('pace') ? 'pace' : 'ef'}
-                    dataKey="rollingEf"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                    name="EF (4wk avg)"
-                    strokeDasharray="4 2"
-                  />
+                  <Line yAxisId={overlays.has('pace') ? 'pace' : 'ef'} dataKey="rollingEf" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls name="EF (4wk avg)" strokeDasharray="4 2" />
                 )}
               </>
             )}
 
-            {/* === OVERLAY: Cadence === */}
+            {/* Cadence overlay */}
             {overlays.has('cadence') && (
-              <Scatter
-                yAxisId={overlays.has('pace') ? 'pace' : overlays.has('ef') ? 'ef' : 'cadence'}
-                dataKey="cadence"
-                fill="#22c55e"
-                r={3}
-                fillOpacity={0.5}
-                name="Cadence"
-              />
+              <Scatter yAxisId={overlays.has('pace') ? 'pace' : overlays.has('ef') ? 'ef' : 'cadence'} dataKey="cadence" fill="#22c55e" r={3} fillOpacity={0.5} name="Cadence" />
             )}
           </ComposedChart>
         </ResponsiveContainer>
@@ -385,7 +253,7 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
         </span>
         {overlays.has('pace') && (
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-orange-500 rounded" style={{ borderBottom: '1px dashed' }}></span>
+            <span className="w-3 h-0.5 bg-orange-500 rounded"></span>
             Pace (right axis, inverted)
           </span>
         )}
