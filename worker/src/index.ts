@@ -5,6 +5,7 @@ export interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   STRAVA_CLIENT_ID: string;
   STRAVA_CLIENT_SECRET: string;
+  STRAVA_WEBHOOK_VERIFY_TOKEN: string; 
 }
 
 interface StravaTokenResponse {
@@ -390,6 +391,83 @@ export default {
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
 
       return json({ configured: true, ...settings });
+    }
+
+    // --- Webhook: Strava Subscription Validation ---
+    if (path === '/api/webhook' && request.method === 'GET') {
+      const mode = url.searchParams.get('hub.mode');
+      const token = url.searchParams.get('hub.verify_token');
+      const challenge = url.searchParams.get('hub.challenge');
+
+      if (mode === 'subscribe' && token === env.STRAVA_WEBHOOK_VERIFY_TOKEN && challenge) {
+        return json({ 'hub.challenge': challenge });
+      }
+
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    // --- Webhook: Receive Strava Events ---
+    if (path === '/api/webhook' && request.method === 'POST') {
+      const event = await request.json() as {
+        object_type: 'activity' | 'athlete';
+        aspect_type: 'create' | 'update' | 'delete';
+        object_id: number;
+        owner_id: number;
+        subscription_id: number;
+        event_time: number;
+        updates?: Record<string, string>;
+      };
+
+      const athleteId = event.owner_id.toString();
+
+      // Activity events
+      if (event.object_type === 'activity') {
+        if (event.aspect_type === 'create' || event.aspect_type === 'update') {
+          const token = await getValidToken(athleteId, env);
+          if (token) {
+            try {
+              const res = await fetch(
+                `https://www.strava.com/api/v3/activities/${event.object_id}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (res.ok) {
+                const activity: StravaActivity = await res.json();
+                if (activity.type === 'Run' || activity.sport_type === 'Run') {
+                  const cacheKey = `${athleteId}:activities`;
+                  const cached = await env.MAF_ACTIVITIES.get(cacheKey);
+                  let activities: StravaActivity[] = cached ? JSON.parse(cached) : [];
+                  activities = activities.filter((a) => a.id !== activity.id);
+                  activities.push(activity);
+                  activities.sort(
+                    (a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+                  );
+                  await env.MAF_ACTIVITIES.put(cacheKey, JSON.stringify(activities));
+                }
+              }
+            } catch {
+              // Best-effort — Strava will retry
+            }
+          }
+        } else if (event.aspect_type === 'delete') {
+          const cacheKey = `${athleteId}:activities`;
+          const cached = await env.MAF_ACTIVITIES.get(cacheKey);
+          if (cached) {
+            let activities: StravaActivity[] = JSON.parse(cached);
+            activities = activities.filter((a) => a.id !== event.object_id);
+            await env.MAF_ACTIVITIES.put(cacheKey, JSON.stringify(activities));
+          }
+          await env.MAF_ACTIVITIES.delete(`${athleteId}:stream:${event.object_id}`);
+        }
+      }
+
+      // Athlete deauthorization — required by Strava API Agreement
+      if (event.object_type === 'athlete' && event.updates?.authorized === 'false') {
+        await env.MAF_TOKENS.delete(athleteId);
+        await env.MAF_SETTINGS.delete(`${athleteId}:settings`);
+        await env.MAF_ACTIVITIES.delete(`${athleteId}:activities`);
+      }
+
+      return json({ ok: true });
     }
 
     // --- Static Assets / SPA Fallback ---
