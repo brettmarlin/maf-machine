@@ -1,0 +1,31 @@
+name = "maf-machine-dev"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+routes = [
+  { pattern = "maf-dev.marliin.com/*", zone_name = "marliin.com" }
+]
+
+[assets]
+directory = "../app/dist"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "MAF_TOKENS"
+id = "7fb555c0c26842ec8c43966c7bd4998a"
+
+[[kv_namespaces]]
+binding = "MAF_ACTIVITIES"
+id = "fba9b72e54e74bd492c3c75902c5749b"
+
+[[kv_namespaces]]
+binding = "MAF_SETTINGS"
+id = "08b7ce8af969418595856f61fb42c6c6"
+
+[[kv_namespaces]]
+binding = "MAF_GAME"
+id = "da4c031c54784e1d878b087294a76421"
+
+[vars]
+DEV_MODE = "true"
+DEV_ATHLETE_ID = "9127290"

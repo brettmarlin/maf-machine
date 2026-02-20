@@ -58,6 +58,11 @@ function getAthleteIdFromCookie(request: Request): string | null {
 }
 
 async function resolveSession(request: Request, env: Env): Promise<string | null> {
+  // Dev mode: bypass auth
+  if ((env as any).DEV_MODE === 'true') {
+    return (env as any).DEV_ATHLETE_ID || null;
+  }
+
   const sessionId = getAthleteIdFromCookie(request);
   if (!sessionId) return null;
   return await env.MAF_TOKENS.get(`session:${sessionId}`);
