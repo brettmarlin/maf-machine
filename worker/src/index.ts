@@ -213,9 +213,11 @@ export default {
       if (sessionId) {
         await env.MAF_TOKENS.delete(`session:${sessionId}`);
       }
-      return new Response(JSON.stringify({ ok: true }), {
+      const baseUrl = getBaseUrl(request);
+      return new Response(null, {
+        status: 302,
         headers: {
-          'Content-Type': 'application/json',
+          'Location': baseUrl,
           'Set-Cookie': 'maf_session=; Path=/; HttpOnly; Max-Age=0',
         },
       });
