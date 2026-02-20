@@ -1,10 +1,18 @@
+import { analyzeActivity } from './lib/mafAnalysis';
+import type { StravaActivity, StreamData, UserSettings } from './lib/mafAnalysis';
+import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
+
 export interface Env {
   MAF_TOKENS: KVNamespace;
   MAF_ACTIVITIES: KVNamespace;
   MAF_SETTINGS: KVNamespace;
+  MAF_GAME: KVNamespace;
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   STRAVA_CLIENT_ID: string;
   STRAVA_CLIENT_SECRET: string;
+  ANTHROPIC_API_KEY?: string;
+  DEV_MODE?: string;
+  DEV_ATHLETE_ID?: string;
 }
 
 interface StravaTokenResponse {
@@ -22,20 +30,6 @@ interface StoredTokens {
   access_token: string;
   refresh_token: string;
   expires_at: number;
-}
-
-interface StravaActivity {
-  id: number;
-  name: string;
-  type: string;
-  sport_type: string;
-  start_date: string;
-  elapsed_time: number;
-  distance: number;
-  average_heartrate?: number;
-  average_cadence?: number;
-  total_elevation_gain: number;
-  average_speed: number;
 }
 
 // --- Helpers ---
@@ -59,8 +53,8 @@ function getAthleteIdFromCookie(request: Request): string | null {
 
 async function resolveSession(request: Request, env: Env): Promise<string | null> {
   // Dev mode: bypass auth
-  if ((env as any).DEV_MODE === 'true') {
-    return (env as any).DEV_ATHLETE_ID || null;
+  if (env.DEV_MODE === 'true') {
+    return env.DEV_ATHLETE_ID || null;
   }
 
   const sessionId = getAthleteIdFromCookie(request);
@@ -79,6 +73,10 @@ async function getValidToken(athleteId: string, env: Env): Promise<string | null
     return tokens.access_token;
   }
 
+  return await refreshToken(athleteId, tokens, env);
+}
+
+async function refreshToken(athleteId: string, tokens: StoredTokens, env: Env): Promise<string | null> {
   const response = await fetch('https://www.strava.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -120,6 +118,143 @@ async function requireAuth(request: Request, env: Env): Promise<string | Respons
   return athleteId;
 }
 
+// --- Settings Helper ---
+
+async function loadSettings(env: Env, athleteId: string): Promise<UserSettings | null> {
+  const raw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
+  if (!raw) return null;
+  return JSON.parse(raw) as UserSettings;
+}
+
+// --- Webhook Processing ---
+
+const STRAVA_WEBHOOK_VERIFY_TOKEN = 'maf-machine-verify';
+
+async function processWebhookActivity(
+  athleteId: string,
+  activityId: number,
+  env: Env
+): Promise<void> {
+  console.log(`[webhook] Processing activity ${activityId} for athlete ${athleteId}`);
+
+  // 1. Get valid token
+  const token = await getValidToken(athleteId, env);
+  if (!token) {
+    console.log(`[webhook] No valid token for athlete ${athleteId}`);
+    return;
+  }
+
+  // 2. Load settings
+  const settings = await loadSettings(env, athleteId);
+  if (!settings) {
+    console.log(`[webhook] No settings for athlete ${athleteId}`);
+    return;
+  }
+
+  // 3. Fetch activity from Strava
+  const activityRes = await fetch(
+    `https://www.strava.com/api/v3/activities/${activityId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!activityRes.ok) {
+    console.log(`[webhook] Failed to fetch activity ${activityId}: ${activityRes.status}`);
+    return;
+  }
+
+  const activity: StravaActivity = await activityRes.json();
+
+  // Only process runs
+  if (activity.type !== 'Run' && activity.sport_type !== 'Run') {
+    console.log(`[webhook] Activity ${activityId} is not a run, skipping`);
+    return;
+  }
+
+  // 4. Fetch streams
+  let streams: StreamData | null = null;
+  const streamCacheKey = `${athleteId}:stream:${activityId}`;
+  const cachedStream = await env.MAF_ACTIVITIES.get(streamCacheKey);
+
+  if (cachedStream) {
+    streams = JSON.parse(cachedStream);
+  } else {
+    const streamRes = await fetch(
+      `https://www.strava.com/api/v3/activities/${activityId}/streams?keys=heartrate,cadence,velocity_smooth,time,distance,altitude&key_by_type=true`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (streamRes.ok) {
+      streams = await streamRes.json();
+      await env.MAF_ACTIVITIES.put(streamCacheKey, JSON.stringify(streams));
+    } else {
+      console.log(`[webhook] Failed to fetch streams for ${activityId}: ${streamRes.status}`);
+    }
+  }
+
+  // 5. Run analysis
+  const analysis = analyzeActivity(activity, streams, settings);
+
+  // 6. Cache analysis
+  await env.MAF_ACTIVITIES.put(
+    `${athleteId}:analysis:${activityId}`,
+    JSON.stringify(analysis)
+  );
+
+  // 7. Update activity cache (add to list if not present)
+  const activitiesCacheKey = `${athleteId}:activities`;
+  const cachedActivities = await env.MAF_ACTIVITIES.get(activitiesCacheKey);
+  if (cachedActivities) {
+    const activities: StravaActivity[] = JSON.parse(cachedActivities);
+    const exists = activities.some((a) => a.id === activity.id);
+    if (!exists) {
+      activities.unshift(activity);
+      activities.sort((a, b) =>
+        new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+      );
+      await env.MAF_ACTIVITIES.put(activitiesCacheKey, JSON.stringify(activities));
+    }
+  }
+
+  // 8. Process game state (XP, quests, milestones, streaks)
+  const gameResult = await processNewRun(env.MAF_GAME, athleteId, analysis, settings);
+
+  console.log(
+    `[webhook] Activity ${activityId} processed: ` +
+    `qualifying=${analysis.qualifying}, ` +
+    `xp=${gameResult.xp_earned}, ` +
+    `zone_min=${analysis.zone_minutes.toFixed(1)}, ` +
+    `milestones=${gameResult.milestones_unlocked.join(',') || 'none'}, ` +
+    `quest=${gameResult.quest_completed || 'none'}`
+  );
+
+  // TODO Phase 2: Generate coaching assessment here
+}
+
+async function processWebhookDelete(
+  athleteId: string,
+  activityId: number,
+  env: Env
+): Promise<void> {
+  console.log(`[webhook] Deleting activity ${activityId} for athlete ${athleteId}`);
+
+  // Remove cached analysis and stream
+  await env.MAF_ACTIVITIES.delete(`${athleteId}:analysis:${activityId}`);
+  await env.MAF_ACTIVITIES.delete(`${athleteId}:stream:${activityId}`);
+
+  // Remove from activity list cache
+  const cacheKey = `${athleteId}:activities`;
+  const cached = await env.MAF_ACTIVITIES.get(cacheKey);
+  if (cached) {
+    const activities: StravaActivity[] = JSON.parse(cached);
+    const filtered = activities.filter((a) => a.id !== activityId);
+    await env.MAF_ACTIVITIES.put(cacheKey, JSON.stringify(filtered));
+  }
+
+  // Note: We don't recalculate XP on delete for now.
+  // This would require re-processing all runs, which is complex.
+  // Deferred to Phase 7 polish.
+}
+
 // --- Main Handler ---
 
 export default {
@@ -131,6 +266,222 @@ export default {
 
     if (path === '/api/health') {
       return json({ status: 'ok' });
+    }
+
+    // --- Webhook: Verification (GET) ---
+    if (path === '/api/webhook' && request.method === 'GET') {
+      const mode = url.searchParams.get('hub.mode');
+      const token = url.searchParams.get('hub.verify_token');
+      const challenge = url.searchParams.get('hub.challenge');
+
+      if (mode === 'subscribe' && token === STRAVA_WEBHOOK_VERIFY_TOKEN) {
+        return json({ 'hub.challenge': challenge });
+      }
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    // --- Webhook: Event (POST) ---
+    if (path === '/api/webhook' && request.method === 'POST') {
+      const event = await request.json() as {
+        aspect_type: string;
+        object_type: string;
+        object_id: number;
+        owner_id: number;
+        subscription_id?: number;
+        updates?: Record<string, unknown>;
+      };
+
+      console.log(`[webhook] Received: ${event.aspect_type} ${event.object_type} ${event.object_id} owner=${event.owner_id}`);
+
+      if (event.object_type !== 'activity') {
+        return json({ ok: true });
+      }
+
+      const athleteId = event.owner_id.toString();
+
+      if (event.aspect_type === 'create' || event.aspect_type === 'update') {
+        const processingPromise = processWebhookActivity(athleteId, event.object_id, env);
+
+        // In dev mode, await directly so logs are visible in terminal
+        if (env.DEV_MODE === 'true') {
+          await processingPromise;
+        } else {
+          try {
+            (globalThis as any).waitUntil?.(processingPromise);
+          } catch {
+            processingPromise.catch((err: Error) =>
+              console.error('[webhook] Processing error:', err)
+            );
+          }
+        }
+      }
+
+      if (event.aspect_type === 'delete') {
+        const deletePromise = processWebhookDelete(athleteId, event.object_id, env);
+
+        if (env.DEV_MODE === 'true') {
+          await deletePromise;
+        } else {
+          try {
+            (globalThis as any).waitUntil?.(deletePromise);
+          } catch {
+            deletePromise.catch((err: Error) =>
+              console.error('[webhook] Delete error:', err)
+            );
+          }
+        }
+      }
+
+      // Strava expects 200 within 2 seconds
+      return json({ ok: true });
+    }
+
+    // --- Game State ---
+    if (path === '/api/game' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const state = await loadGameState(env.MAF_GAME, athleteId);
+      const response = buildGameAPIResponse(state);
+      return json(response);
+    }
+
+    // --- Game Settings (weekly target) ---
+    if (path === '/api/game/settings' && request.method === 'PUT') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const body = await request.json() as { weekly_target_zone_minutes?: number };
+      if (!body.weekly_target_zone_minutes || body.weekly_target_zone_minutes < 10 || body.weekly_target_zone_minutes > 500) {
+        return json({ error: 'Invalid weekly target (10-500 minutes)' }, 400);
+      }
+
+      const state = await loadGameState(env.MAF_GAME, athleteId);
+      state.weekly_target_zone_minutes = body.weekly_target_zone_minutes;
+      await saveGameState(env.MAF_GAME, athleteId, state);
+
+      return json({ ok: true, weekly_target_zone_minutes: body.weekly_target_zone_minutes });
+    }
+
+    // --- Backfill: Process cached activities through game engine ---
+    if (path === '/api/backfill' && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) {
+        return json({ error: 'Configure settings first' }, 400);
+      }
+
+      // Load cached activities
+      const cached = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (!cached) {
+        return json({ error: 'No cached activities' }, 400);
+      }
+
+      const activities: StravaActivity[] = JSON.parse(cached);
+
+      // Filter by start_date if set
+      let toProcess = activities;
+      if (settings.start_date) {
+        const startTs = new Date(settings.start_date).getTime();
+        toProcess = activities.filter(
+          (a) => new Date(a.start_date).getTime() >= startTs
+        );
+      }
+
+      // Sort chronologically for correct streak/weekly processing
+      toProcess.sort(
+        (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+      );
+
+      // Reset game state for clean backfill
+      const { createInitialGameState } = await import('./lib/gameTypes');
+      const freshState = createInitialGameState();
+      // Preserve user's weekly target if they set one
+      const existingState = await loadGameState(env.MAF_GAME, athleteId);
+      freshState.weekly_target_zone_minutes = existingState.weekly_target_zone_minutes;
+      // Complete first_steps quest since settings exist
+      freshState.quests_completed = ['first_steps'];
+      freshState.quest_active = 'first_maf_run';
+      freshState.quest_progress = { first_steps: 1 };
+      freshState.badges = ['🏃'];
+      await saveGameState(env.MAF_GAME, athleteId, freshState);
+
+      let processed = 0;
+      let qualifying = 0;
+      let totalXP = 0;
+
+      for (const activity of toProcess) {
+        // Load stream from cache
+        const streamCacheKey = `${athleteId}:stream:${activity.id}`;
+        const cachedStream = await env.MAF_ACTIVITIES.get(streamCacheKey);
+        const streams: StreamData | null = cachedStream ? JSON.parse(cachedStream) : null;
+
+        // Analyze
+        const analysis = analyzeActivity(activity, streams, settings);
+
+        // Cache analysis
+        await env.MAF_ACTIVITIES.put(
+          `${athleteId}:analysis:${activity.id}`,
+          JSON.stringify(analysis)
+        );
+
+        // Process game state
+        const result = await processNewRun(env.MAF_GAME, athleteId, analysis, settings);
+
+        processed++;
+        if (analysis.qualifying) qualifying++;
+        totalXP += result.xp_earned;
+      }
+
+      const finalState = await loadGameState(env.MAF_GAME, athleteId);
+      const gameResponse = buildGameAPIResponse(finalState);
+
+      return json({
+        backfill: {
+          total_activities: activities.length,
+          processed,
+          qualifying,
+          total_xp: totalXP,
+        },
+        game: gameResponse,
+      });
+    }
+
+    // --- Debug: Analyze a specific activity ---
+    if (path.match(/^\/api\/debug\/analyze\/(\d+)$/) && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const activityId = path.split('/').pop()!;
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) return json({ error: 'No settings' }, 400);
+
+      // Try cached analysis first
+      const cachedAnalysis = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activityId}`);
+      if (cachedAnalysis) {
+        return json({ source: 'cache', analysis: JSON.parse(cachedAnalysis) });
+      }
+
+      // Try to analyze from cached streams
+      const cachedStream = await env.MAF_ACTIVITIES.get(`${athleteId}:stream:${activityId}`);
+      const streams: StreamData | null = cachedStream ? JSON.parse(cachedStream) : null;
+
+      // Need the activity data
+      const activitiesRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (!activitiesRaw) return json({ error: 'No activities cached' }, 404);
+
+      const activities: StravaActivity[] = JSON.parse(activitiesRaw);
+      const activity = activities.find((a) => a.id === parseInt(activityId));
+      if (!activity) return json({ error: 'Activity not found in cache' }, 404);
+
+      const analysis = analyzeActivity(activity, streams, settings);
+      return json({ source: 'computed', analysis });
     }
 
     // --- OAuth: Redirect to Strava ---
@@ -190,7 +541,6 @@ export default {
         expirationTtl: 60 * 60 * 24 * 7,
       });
 
-      // In dev, redirect to Vite dev server; in production, to /maf-machine
       const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
       const redirectTo = isLocal ? 'http://localhost:5173' : baseUrl;
 
@@ -270,7 +620,7 @@ export default {
 
         const batch: StravaActivity[] = await res.json();
         const runs = batch.filter(
-          (a) => a.type === 'Run' || a.sport_type === 'Run'
+          (a: StravaActivity) => a.type === 'Run' || a.sport_type === 'Run'
         );
         newActivities = newActivities.concat(runs);
 
@@ -292,8 +642,6 @@ export default {
 
       await env.MAF_ACTIVITIES.put(cacheKey, JSON.stringify(deduped));
 
-      // Filter response by ?after param from frontend (date range)
-      const url = new URL(request.url);
       const filterAfter = url.searchParams.get('after');
       let responseActivities = deduped;
       if (filterAfter) {
@@ -393,6 +741,9 @@ export default {
       };
 
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
+
+      // Complete first_steps quest if active
+      await onSettingsSaved(env.MAF_GAME, athleteId);
 
       return json({ configured: true, ...settings });
     }
