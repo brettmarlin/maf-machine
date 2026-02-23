@@ -1,6 +1,13 @@
 import { analyzeActivity } from './lib/mafAnalysis';
-import type { StravaActivity, StreamData, UserSettings } from './lib/mafAnalysis';
+import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './lib/mafAnalysis';
 import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
+import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
+import {
+  generatePostRunCoaching, generateWeeklySummary, handleChatMessage,
+  getCachedCoaching, cacheCoaching, getCachedWeeklySummary, cacheWeeklySummary,
+  loadChatState, saveChatState,
+  type CoachingAssessment,
+} from './lib/coachingEngine';
 
 export interface Env {
   MAF_TOKENS: KVNamespace;
@@ -126,6 +133,31 @@ async function loadSettings(env: Env, athleteId: string): Promise<UserSettings |
   return JSON.parse(raw) as UserSettings;
 }
 
+// --- Recent Analyses Helper ---
+
+async function loadRecentAnalyses(
+  env: Env,
+  athleteId: string,
+  count: number
+): Promise<MAFActivity[]> {
+  // Load activity list to get IDs, then fetch analyses
+  const cached = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+  if (!cached) return [];
+
+  const activities: StravaActivity[] = JSON.parse(cached);
+  const recent = activities.slice(0, count);
+  const analyses: MAFActivity[] = [];
+
+  for (const activity of recent) {
+    const raw = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activity.id}`);
+    if (raw) {
+      analyses.push(JSON.parse(raw));
+    }
+  }
+
+  return analyses;
+}
+
 // --- Webhook Processing ---
 
 const STRAVA_WEBHOOK_VERIFY_TOKEN = 'maf-machine-verify';
@@ -227,7 +259,33 @@ async function processWebhookActivity(
     `quest=${gameResult.quest_completed || 'none'}`
   );
 
-  // TODO Phase 2: Generate coaching assessment here
+  // 9. Generate coaching assessment (if API key is available)
+  if (env.ANTHROPIC_API_KEY && analysis.qualifying) {
+    try {
+      // Load recent activities for context
+      const recentActivities = await loadRecentAnalyses(env, athleteId, 10);
+      const gameState = await loadGameState(env.MAF_GAME, athleteId);
+
+      const payload = buildPostRunPayload(
+        analysis,
+        recentActivities,
+        gameState,
+        settings,
+        gameResult.xp_earned,
+        gameResult.xp_breakdown,
+        gameResult.milestones_unlocked,
+        gameResult.quest_completed
+      );
+
+      const coaching = await generatePostRunCoaching(env.ANTHROPIC_API_KEY, payload);
+      await cacheCoaching(env.MAF_GAME, athleteId, activityId, coaching);
+
+      console.log(`[webhook] Coaching generated: "${coaching.headline}"`);
+    } catch (err) {
+      console.error('[webhook] Coaching generation failed:', err);
+      // Non-fatal — game state is already saved
+    }
+  }
 }
 
 async function processWebhookDelete(
@@ -363,6 +421,206 @@ export default {
       await saveGameState(env.MAF_GAME, athleteId, state);
 
       return json({ ok: true, weekly_target_zone_minutes: body.weekly_target_zone_minutes });
+    }
+
+    // --- Coaching: Latest ---
+    if (path === '/api/coaching/latest' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      // Find most recent activity with coaching
+      const cached = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (!cached) return json({ error: 'No activities' }, 404);
+
+      const activities: StravaActivity[] = JSON.parse(cached);
+      for (const activity of activities.slice(0, 20)) {
+        const coaching = await getCachedCoaching(env.MAF_GAME, athleteId, activity.id);
+        if (coaching) {
+          const analysis = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activity.id}`);
+          return json({
+            activity_id: activity.id,
+            ...coaching,
+            analysis: analysis ? JSON.parse(analysis) : null,
+          });
+        }
+      }
+
+      return json({ error: 'No coaching assessments yet' }, 404);
+    }
+
+    // --- Coaching: Specific Activity ---
+    const coachingMatch = path.match(/^\/api\/coaching\/(\d+)$/);
+    if (coachingMatch && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const activityId = parseInt(coachingMatch[1]);
+      const coaching = await getCachedCoaching(env.MAF_GAME, athleteId, activityId);
+
+      if (!coaching) {
+        return json({ error: 'No coaching for this activity' }, 404);
+      }
+
+      const analysis = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activityId}`);
+      return json({
+        activity_id: activityId,
+        ...coaching,
+        analysis: analysis ? JSON.parse(analysis) : null,
+      });
+    }
+
+    // --- Coaching: Generate for activity (manual trigger) ---
+    const coachingGenMatch = path.match(/^\/api\/coaching\/generate\/(\d+)$/);
+    if (coachingGenMatch && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      if (!env.ANTHROPIC_API_KEY) {
+        return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+      }
+
+      const activityId = parseInt(coachingGenMatch[1]);
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) return json({ error: 'No settings' }, 400);
+
+      // Load analysis
+      const analysisRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activityId}`);
+      if (!analysisRaw) return json({ error: 'No analysis for this activity' }, 404);
+      const analysis: MAFActivity = JSON.parse(analysisRaw);
+
+      // Load context
+      const recentActivities = await loadRecentAnalyses(env, athleteId, 10);
+      const gameState = await loadGameState(env.MAF_GAME, athleteId);
+
+      const payload = buildPostRunPayload(
+        analysis, recentActivities, gameState, settings,
+        0, {}, [], null
+      );
+
+      const coaching = await generatePostRunCoaching(env.ANTHROPIC_API_KEY, payload);
+      await cacheCoaching(env.MAF_GAME, athleteId, activityId, coaching);
+
+      return json({ activity_id: activityId, ...coaching });
+    }
+
+    // --- Coaching: Weekly Summary (GET) ---
+    if (path === '/api/coaching/weekly' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      // Find most recent weekly summary
+      const gameState = await loadGameState(env.MAF_GAME, athleteId);
+      const history = gameState.weekly_history;
+
+      for (let i = history.length - 1; i >= 0; i--) {
+        const summary = await getCachedWeeklySummary(env.MAF_GAME, athleteId, history[i].week);
+        if (summary) {
+          return json({ week: history[i].week, ...summary });
+        }
+      }
+
+      return json({ error: 'No weekly summaries yet' }, 404);
+    }
+
+    // --- Coaching: Weekly Summary (POST — manual trigger) ---
+    if (path === '/api/coaching/weekly' && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      if (!env.ANTHROPIC_API_KEY) {
+        return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+      }
+
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) return json({ error: 'No settings' }, 400);
+
+      const gameState = await loadGameState(env.MAF_GAME, athleteId);
+      const recentActivities = await loadRecentAnalyses(env, athleteId, 20);
+
+      const payload = buildWeeklySummaryPayload(gameState, recentActivities, settings);
+      const summary = await generateWeeklySummary(env.ANTHROPIC_API_KEY, payload);
+
+      const week = payload.this_week.iso_week;
+      await cacheWeeklySummary(env.MAF_GAME, athleteId, week, summary);
+
+      return json({ week, ...summary });
+    }
+
+    // --- Coaching: Chat ---
+    if (path === '/api/coaching/chat' && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      if (!env.ANTHROPIC_API_KEY) {
+        return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+      }
+
+      const body = await request.json() as { message?: string };
+      if (!body.message || body.message.trim().length === 0) {
+        return json({ error: 'Message required' }, 400);
+      }
+      if (body.message.length > 1000) {
+        return json({ error: 'Message too long (max 1000 chars)' }, 400);
+      }
+
+      // Rate limiting: check message count today
+      const chatState = await loadChatState(env.MAF_GAME, athleteId);
+      const today = new Date().toISOString().split('T')[0];
+      const todayMessages = chatState.messages.filter(
+        (m) => m.role === 'user' && m.timestamp.startsWith(today)
+      );
+      if (todayMessages.length >= 20) {
+        return json({ error: 'Daily chat limit reached (20 messages/day)' }, 429);
+      }
+
+      // Build context summary for the chat
+      const settings = await loadSettings(env, athleteId);
+      const gameState = await loadGameState(env.MAF_GAME, athleteId);
+      const recentActivities = await loadRecentAnalyses(env, athleteId, 5);
+
+      const contextParts: string[] = [];
+      if (settings) {
+        contextParts.push(`Runner: age ${settings.age}, MAF HR ${settings.maf_hr}, zone ${settings.maf_zone_low}-${settings.maf_zone_high}`);
+      }
+      contextParts.push(`Level ${gameState.xp_total > 0 ? Math.floor(gameState.xp_total / 500) + 1 : 1}, ${gameState.xp_total} XP, ${gameState.streak_current_weeks}-week streak`);
+
+      if (recentActivities.length > 0) {
+        const latest = recentActivities[0];
+        contextParts.push(`Latest run: ${latest.zone_minutes.toFixed(1)} zone min, ${latest.time_in_maf_zone_pct.toFixed(0)}% in zone, drift ${latest.cardiac_drift.toFixed(1)}%`);
+      }
+
+      // Find latest coaching for additional context
+      const activitiesRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (activitiesRaw) {
+        const activities: StravaActivity[] = JSON.parse(activitiesRaw);
+        for (const a of activities.slice(0, 5)) {
+          const coaching = await getCachedCoaching(env.MAF_GAME, athleteId, a.id);
+          if (coaching) {
+            contextParts.push(`Latest coaching headline: "${coaching.headline}"`);
+            contextParts.push(`Assessment: ${coaching.assessment.substring(0, 300)}...`);
+            break;
+          }
+        }
+      }
+
+      const contextSummary = contextParts.join('\n');
+
+      const { response, updatedChat } = await handleChatMessage(
+        env.ANTHROPIC_API_KEY,
+        body.message.trim(),
+        chatState,
+        contextSummary
+      );
+
+      await saveChatState(env.MAF_GAME, athleteId, updatedChat);
+
+      return json({ response });
     }
 
     // --- Backfill: Process cached activities through game engine ---
