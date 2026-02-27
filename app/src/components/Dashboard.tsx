@@ -14,8 +14,6 @@ import {
 } from '../lib/mafAnalysis'
 import type {
   MAFActivity,
-  MAFTrend,
-  MAFSummary,
 } from '../lib/mafAnalysis'
 
 interface Settings {

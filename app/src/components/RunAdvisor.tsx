@@ -18,7 +18,7 @@ function generateAdvice(
   summary: MAFSummary,
   activities: MAFActivity[],
   mafHr: number,
-  units: 'km' | 'mi'
+  _units: 'km' | 'mi'
 ): Advice {
   const ceiling = `${mafHr} bpm`
 

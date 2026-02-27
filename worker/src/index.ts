@@ -1,7 +1,7 @@
 import { analyzeActivity } from './lib/mafAnalysis';
 import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './lib/mafAnalysis';
-import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
-import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
+// import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
+// import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
 import {
   generatePostRunCoaching, generateWeeklySummary, handleChatMessage,
   getCachedCoaching, cacheCoaching, getCachedWeeklySummary, cacheWeeklySummary,
@@ -998,8 +998,10 @@ export default {
 
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
 
-      // Complete first_steps quest if active
-      await onSettingsSaved(env.MAF_GAME, athleteId);
+      // Complete first_steps quest if active (v2 only)
+      //if (env.MAF_GAME) {
+      //  try { await onSettingsSaved(env.MAF_GAME, athleteId); } catch {}
+     // ``}
 
       return json({ configured: true, ...settings });
     }
