@@ -83,7 +83,9 @@ export async function loadGameState(
   if (!raw) return createInitialGameState();
 
   try {
-    return JSON.parse(raw) as GameState;
+    const initial = createInitialGameState();
+    const loaded = JSON.parse(raw);
+    return { ...initial, ...loaded } as GameState;
   } catch {
     return createInitialGameState();
   }
@@ -131,7 +133,7 @@ export async function processNewRun(
   let weeklyBonusXP = 0;
 
   // 2. Update weekly progress
-  const weeklyUpdate = updateWeeklyProgress(activity, state, settings.maf_zone_high);
+  const weeklyUpdate = updateWeeklyProgress(activity, state, settings.maf_hr);
 
   // Apply weekly update to state
   if (weeklyUpdate.is_new_week) {
@@ -267,7 +269,7 @@ function checkMilestones(
 
   for (const m of MILESTONES) {
     // Skip already unlocked
-    if (state.milestones.includes(m.id)) continue;
+    if ((state.milestones || []).includes(m.id)) continue;
 
     let earned = false;
 
@@ -361,7 +363,7 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
   }
 
   // Recent milestones (last 5)
-  const recentMilestones = state.milestones.slice(-5);
+  const recentMilestones = (state.milestones || []).slice(-5);
 
   return {
     xp_total: state.xp_total,
@@ -369,8 +371,8 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
     level_name: level.name,
     xp_to_next_level: xpToNext,
     streak: {
-      current: state.streak_current_weeks,
-      longest: state.streak_longest,
+      current: state.streak_current_weeks || 0,
+      longest: state.streak_longest || 0,
       multiplier: streakMultiplier,
     },
     weekly: {

@@ -1,18 +1,21 @@
 /**
  * coachingPayload.ts — Builds the structured context payload sent to Claude API
  * for post-run coaching assessments and weekly summaries.
+ *
+ * Ceiling model: maf_hr is the max. Everything at or below is good.
  */
 
 import type { MAFActivity, UserSettings } from './mafAnalysis';
+import { formatPace as formatPaceFromMinPerUnit } from './mafAnalysis';
 import type { GameState, WeeklyRecord } from './gameTypes';
-import { getLevelFromXP, getXPToNextLevel, getStreakMultiplier, LEVEL_TABLE } from './gameTypes';
+import { getLevelFromXP, getXPToNextLevel, getStreakMultiplier } from './gameTypes';
 
 // --- Payload Interfaces ---
 
 export interface RunnerContext {
   age: number;
   maf_hr: number;
-  maf_zone: [number, number];
+  maf_ceiling: number;
   units: 'km' | 'mi';
   weekly_target_zone_minutes: number;
   training_start_date: string | null;
@@ -27,13 +30,16 @@ export interface ThisRunContext {
   distance_unit: string;
   avg_hr: number;
   zone_minutes: number;
-  zone_pct: number;
+  below_ceiling_pct: number;
+  time_controlled_pct: number;
+  time_easy_pct: number;
+  time_over_ceiling_pct: number;
   longest_zone_streak_minutes: number;
   zone_entries: number;
   warmup_score: number;
-  cardiac_drift_pct: number;
-  aerobic_decoupling_pct: number;
-  avg_cadence: number;
+  cardiac_drift_pct: number | null;
+  aerobic_decoupling_pct: number | null;
+  avg_cadence: number | null;
   pace_at_maf: string;
   negative_split: boolean;
   pace_steadiness_score: number;
@@ -47,10 +53,11 @@ export interface ThisRunContext {
 
 export interface RecentRunSummary {
   date: string;
+  name: string;
   zone_minutes: number;
-  zone_pct: number;
+  below_ceiling_pct: number;
   pace_at_maf: string;
-  cardiac_drift_pct: number;
+  cardiac_drift_pct: number | null;
   warmup_score: number;
   xp_earned: number;
 }
@@ -73,7 +80,7 @@ export interface TrendsContext {
   pace_at_maf_4wk_avg: string | null;
   pace_at_maf_8wk_avg: string | null;
   pace_improvement_pct: number | null;
-  avg_zone_discipline_4wk: number | null;
+  avg_below_ceiling_4wk: number | null;
   avg_cardiac_drift_4wk: number | null;
   total_zone_minutes_lifetime: number;
   total_qualifying_runs: number;
@@ -105,18 +112,9 @@ export interface WeeklySummaryPayload {
 
 // --- Helper Functions ---
 
-function formatPace(metersPerSecond: number, units: 'km' | 'mi'): string {
-  if (!metersPerSecond || metersPerSecond <= 0) return '--:--';
-
-  const secondsPerMeter = 1 / metersPerSecond;
-  const divisor = units === 'mi' ? 1609.344 : 1000;
-  const secondsPerUnit = secondsPerMeter * divisor;
-
-  const minutes = Math.floor(secondsPerUnit / 60);
-  const seconds = Math.round(secondsPerUnit % 60);
-  const unit = units === 'mi' ? '/mi' : '/km';
-
-  return `${minutes}:${seconds.toString().padStart(2, '0')}${unit}`;
+function fmtPace(paceMinPerUnit: number, units: 'km' | 'mi'): string {
+  if (!paceMinPerUnit || paceMinPerUnit <= 0) return '--:--';
+  return formatPaceFromMinPerUnit(paceMinPerUnit, units);
 }
 
 function getWeeksInTraining(startDate: string | null): number {
@@ -129,9 +127,7 @@ function getWeeksInTraining(startDate: string | null): number {
 
 function getDaysRemainingInWeek(): number {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ...
-  // ISO week ends on Sunday. Days remaining including today.
-  // Monday=1 → 6 days left, Sunday=0 → 0 days left
+  const dayOfWeek = now.getDay();
   if (dayOfWeek === 0) return 0;
   return 7 - dayOfWeek;
 }
@@ -144,7 +140,90 @@ function getCurrentISOWeek(): string {
   return `${now.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
 }
 
+function roundTo1(n: number | null): number | null {
+  if (n === null || n === undefined) return null;
+  return Math.round(n * 10) / 10;
+}
+
 // --- Payload Builders ---
+
+function buildRunnerContext(settings: UserSettings, gameState: GameState): RunnerContext {
+  return {
+    age: settings.age,
+    maf_hr: settings.maf_hr,
+    maf_ceiling: settings.maf_hr,
+    units: settings.units || 'mi',
+    weekly_target_zone_minutes: gameState.weekly_target_zone_minutes,
+    training_start_date: settings.start_date,
+    weeks_in_training: getWeeksInTraining(settings.start_date),
+  };
+}
+
+function buildStreakContext(gameState: GameState): StreakContext {
+  return {
+    current_weeks: gameState.streak_current_weeks || 0,
+    multiplier: getStreakMultiplier(gameState.streak_current_weeks || 0),
+    longest_ever: gameState.streak_longest || 0,
+  };
+}
+
+function buildTrends(recentActivities: MAFActivity[], gameState: GameState, units: 'km' | 'mi'): TrendsContext {
+  const qualifying = recentActivities.filter((a) => a.qualifying);
+  const last4Weeks = qualifying.slice(0, 12);
+  const last8Weeks = qualifying.slice(0, 24);
+
+  // Average MAF pace (min/unit — lower is faster)
+  const avg4wkPace = last4Weeks.length > 0
+    ? last4Weeks.reduce((sum, a) => sum + a.maf_pace, 0) / last4Weeks.length
+    : 0;
+  const avg8wkPace = last8Weeks.length > 0
+    ? last8Weeks.reduce((sum, a) => sum + a.maf_pace, 0) / last8Weeks.length
+    : 0;
+
+  // Pace improvement: lower pace = faster = improvement
+  const paceImprovement = avg8wkPace > 0 && avg4wkPace < avg8wkPace
+    ? Math.round(((avg8wkPace - avg4wkPace) / avg8wkPace) * 1000) / 10
+    : null;
+
+  const avg4wkDrift = last4Weeks.length > 0
+    ? roundTo1(last4Weeks.reduce((sum, a) => sum + (a.cardiac_drift || 0), 0) / last4Weeks.length)
+    : null;
+
+  const avg4wkBelowCeiling = last4Weeks.length > 0
+    ? roundTo1(last4Weeks.reduce((sum, a) => sum + a.time_below_ceiling_pct, 0) / last4Weeks.length)
+    : null;
+
+  const level = getLevelFromXP(gameState.xp_total);
+
+  return {
+    pace_at_maf_4wk_avg: avg4wkPace > 0 ? fmtPace(avg4wkPace, units) : null,
+    pace_at_maf_8wk_avg: avg8wkPace > 0 ? fmtPace(avg8wkPace, units) : null,
+    pace_improvement_pct: paceImprovement,
+    avg_below_ceiling_4wk: avg4wkBelowCeiling,
+    avg_cardiac_drift_4wk: avg4wkDrift,
+    total_zone_minutes_lifetime: Math.round(
+      recentActivities.reduce((sum, a) => sum + a.zone_minutes, 0)
+    ),
+    total_qualifying_runs: qualifying.length,
+    total_xp: gameState.xp_total,
+    level: level.level,
+    level_name: level.name,
+    xp_to_next_level: getXPToNextLevel(gameState.xp_total),
+  };
+}
+
+function buildRecentRunSummary(a: MAFActivity, units: 'km' | 'mi'): RecentRunSummary {
+  return {
+    date: a.date,
+    name: a.name,
+    zone_minutes: Math.round(a.zone_minutes * 10) / 10,
+    below_ceiling_pct: Math.round(a.time_below_ceiling_pct * 10) / 10,
+    pace_at_maf: fmtPace(a.maf_pace, units),
+    cardiac_drift_pct: roundTo1(a.cardiac_drift),
+    warmup_score: Math.round(a.warmup_score),
+    xp_earned: 0,
+  };
+}
 
 export function buildPostRunPayload(
   activity: MAFActivity,
@@ -159,16 +238,7 @@ export function buildPostRunPayload(
   const units = settings.units || 'mi';
   const currentWeek = getCurrentISOWeek();
 
-  // Build runner context
-  const runner: RunnerContext = {
-    age: settings.age,
-    maf_hr: settings.maf_hr,
-    maf_zone: [settings.maf_zone_low, settings.maf_zone_high],
-    units,
-    weekly_target_zone_minutes: gameState.weekly_target_zone_minutes,
-    training_start_date: settings.start_date,
-    weeks_in_training: getWeeksInTraining(settings.start_date),
-  };
+  const runner = buildRunnerContext(settings, gameState);
 
   // Distance conversion
   const distanceRaw = activity.distance_meters / (units === 'mi' ? 1609.344 : 1000);
@@ -177,23 +247,25 @@ export function buildPostRunPayload(
     ? Math.round((activity.elevation_gain || 0) * 3.28084)
     : Math.round(activity.elevation_gain || 0);
 
-  // Build this_run context
   const this_run: ThisRunContext = {
-    date: activity.start_date,
+    date: activity.date,
     name: activity.name,
     duration_minutes: Math.round(activity.duration_seconds / 60 * 10) / 10,
     distance,
     distance_unit: units,
     avg_hr: activity.avg_hr,
     zone_minutes: Math.round(activity.zone_minutes * 10) / 10,
-    zone_pct: Math.round(activity.time_in_maf_zone_pct * 10) / 10,
+    below_ceiling_pct: Math.round(activity.time_below_ceiling_pct * 10) / 10,
+    time_controlled_pct: Math.round(activity.time_controlled_pct * 10) / 10,
+    time_easy_pct: Math.round(activity.time_easy_pct * 10) / 10,
+    time_over_ceiling_pct: Math.round(activity.time_over_ceiling_pct * 10) / 10,
     longest_zone_streak_minutes: Math.round(activity.longest_zone_streak_minutes * 10) / 10,
     zone_entries: activity.zone_entries,
     warmup_score: Math.round(activity.warmup_score),
-    cardiac_drift_pct: Math.round(activity.cardiac_drift * 10) / 10,
-    aerobic_decoupling_pct: Math.round(activity.aerobic_decoupling * 10) / 10,
-    avg_cadence: Math.round(activity.cadence_in_zone * 10) / 10,
-    pace_at_maf: formatPace(activity.efficiency_factor > 0 ? activity.avg_speed : 0, units),
+    cardiac_drift_pct: roundTo1(activity.cardiac_drift),
+    aerobic_decoupling_pct: roundTo1(activity.aerobic_decoupling),
+    avg_cadence: roundTo1(activity.cadence_in_zone),
+    pace_at_maf: fmtPace(activity.maf_pace, units),
     negative_split: activity.negative_split,
     pace_steadiness_score: Math.round(activity.pace_steadiness_score),
     elevation_gain: elevGain,
@@ -204,19 +276,11 @@ export function buildPostRunPayload(
     quest_completed: questCompleted,
   };
 
-  // Build recent history (last 5 runs, excluding current)
+  // Recent history (last 5, excluding current)
   const last5 = recentActivities
-    .filter((a) => a.activity_id !== activity.activity_id)
+    .filter((a) => a.id !== activity.id)
     .slice(0, 5)
-    .map((a): RecentRunSummary => ({
-      date: a.start_date,
-      zone_minutes: Math.round(a.zone_minutes * 10) / 10,
-      zone_pct: Math.round(a.time_in_maf_zone_pct * 10) / 10,
-      pace_at_maf: formatPace(a.avg_speed, units),
-      cardiac_drift_pct: Math.round(a.cardiac_drift * 10) / 10,
-      warmup_score: Math.round(a.warmup_score),
-      xp_earned: 0, // We don't store XP on analysis; approximation is fine
-    }));
+    .map((a) => buildRecentRunSummary(a, units));
 
   // This week's progress
   const currentWeekRecord = gameState.weekly_history.find((w) => w.week === currentWeek);
@@ -228,54 +292,8 @@ export function buildPostRunPayload(
     days_remaining: getDaysRemainingInWeek(),
   };
 
-  // Streak
-  const streak: StreakContext = {
-    current_weeks: gameState.streak_current_weeks,
-    multiplier: getStreakMultiplier(gameState.streak_current_weeks),
-    longest_ever: gameState.streak_longest,
-  };
-
-  // Trends (computed from recent activities)
-  const qualifying = recentActivities.filter((a) => a.qualifying);
-  const last4Weeks = qualifying.slice(0, 12); // Approximate 4 weeks
-  const last8Weeks = qualifying.slice(0, 24);
-
-  const avg4wkPace = last4Weeks.length > 0
-    ? last4Weeks.reduce((sum, a) => sum + a.avg_speed, 0) / last4Weeks.length
-    : 0;
-  const avg8wkPace = last8Weeks.length > 0
-    ? last8Weeks.reduce((sum, a) => sum + a.avg_speed, 0) / last8Weeks.length
-    : 0;
-
-  const paceImprovement = avg8wkPace > 0 && avg4wkPace > avg8wkPace
-    ? Math.round(((avg4wkPace - avg8wkPace) / avg8wkPace) * 1000) / 10
-    : null;
-
-  const avg4wkDrift = last4Weeks.length > 0
-    ? Math.round(last4Weeks.reduce((sum, a) => sum + a.cardiac_drift, 0) / last4Weeks.length * 10) / 10
-    : null;
-
-  const avg4wkZonePct = last4Weeks.length > 0
-    ? Math.round(last4Weeks.reduce((sum, a) => sum + a.time_in_maf_zone_pct, 0) / last4Weeks.length * 10) / 10
-    : null;
-
-  const level = getLevelFromXP(gameState.xp_total);
-
-  const trends: TrendsContext = {
-    pace_at_maf_4wk_avg: avg4wkPace > 0 ? formatPace(avg4wkPace, units) : null,
-    pace_at_maf_8wk_avg: avg8wkPace > 0 ? formatPace(avg8wkPace, units) : null,
-    pace_improvement_pct: paceImprovement,
-    avg_zone_discipline_4wk: avg4wkZonePct,
-    avg_cardiac_drift_4wk: avg4wkDrift,
-    total_zone_minutes_lifetime: Math.round(
-      recentActivities.reduce((sum, a) => sum + a.zone_minutes, 0)
-    ),
-    total_qualifying_runs: qualifying.length,
-    total_xp: gameState.xp_total,
-    level: level.level,
-    level_name: level.name,
-    xp_to_next_level: getXPToNextLevel(gameState.xp_total),
-  };
+  const streak = buildStreakContext(gameState);
+  const trends = buildTrends(recentActivities, gameState, units);
 
   return {
     runner,
@@ -300,72 +318,13 @@ export function buildWeeklySummaryPayload(
   const thisWeekRecord = history.length > 0 ? history[history.length - 1] : null;
   const lastWeekRecord = history.length > 1 ? history[history.length - 2] : null;
 
-  const runner: RunnerContext = {
-    age: settings.age,
-    maf_hr: settings.maf_hr,
-    maf_zone: [settings.maf_zone_low, settings.maf_zone_high],
-    units,
-    weekly_target_zone_minutes: gameState.weekly_target_zone_minutes,
-    training_start_date: settings.start_date,
-    weeks_in_training: getWeeksInTraining(settings.start_date),
-  };
+  const runner = buildRunnerContext(settings, gameState);
+  const streak = buildStreakContext(gameState);
+  const trends = buildTrends(recentActivities, gameState, units);
 
-  const streak: StreakContext = {
-    current_weeks: gameState.streak_current_weeks,
-    multiplier: getStreakMultiplier(gameState.streak_current_weeks),
-    longest_ever: gameState.streak_longest,
-  };
-
-  const qualifying = recentActivities.filter((a) => a.qualifying);
-  const last4Weeks = qualifying.slice(0, 12);
-  const last8Weeks = qualifying.slice(0, 24);
-
-  const avg4wkPace = last4Weeks.length > 0
-    ? last4Weeks.reduce((sum, a) => sum + a.avg_speed, 0) / last4Weeks.length
-    : 0;
-  const avg8wkPace = last8Weeks.length > 0
-    ? last8Weeks.reduce((sum, a) => sum + a.avg_speed, 0) / last8Weeks.length
-    : 0;
-
-  const paceImprovement = avg8wkPace > 0 && avg4wkPace > avg8wkPace
-    ? Math.round(((avg4wkPace - avg8wkPace) / avg8wkPace) * 1000) / 10
-    : null;
-
-  const avg4wkDrift = last4Weeks.length > 0
-    ? Math.round(last4Weeks.reduce((sum, a) => sum + a.cardiac_drift, 0) / last4Weeks.length * 10) / 10
-    : null;
-
-  const avg4wkZonePct = last4Weeks.length > 0
-    ? Math.round(last4Weeks.reduce((sum, a) => sum + a.time_in_maf_zone_pct, 0) / last4Weeks.length * 10) / 10
-    : null;
-
-  const level = getLevelFromXP(gameState.xp_total);
-
-  const trends: TrendsContext = {
-    pace_at_maf_4wk_avg: avg4wkPace > 0 ? formatPace(avg4wkPace, units) : null,
-    pace_at_maf_8wk_avg: avg8wkPace > 0 ? formatPace(avg8wkPace, units) : null,
-    pace_improvement_pct: paceImprovement,
-    avg_zone_discipline_4wk: avg4wkZonePct,
-    avg_cardiac_drift_4wk: avg4wkDrift,
-    total_zone_minutes_lifetime: Math.round(
-      recentActivities.reduce((sum, a) => sum + a.zone_minutes, 0)
-    ),
-    total_qualifying_runs: qualifying.length,
-    total_xp: gameState.xp_total,
-    level: level.level,
-    level_name: level.name,
-    xp_to_next_level: getXPToNextLevel(gameState.xp_total),
-  };
-
-  const recentRuns: RecentRunSummary[] = recentActivities.slice(0, 10).map((a) => ({
-    date: a.start_date,
-    zone_minutes: Math.round(a.zone_minutes * 10) / 10,
-    zone_pct: Math.round(a.time_in_maf_zone_pct * 10) / 10,
-    pace_at_maf: formatPace(a.avg_speed, units),
-    cardiac_drift_pct: Math.round(a.cardiac_drift * 10) / 10,
-    warmup_score: Math.round(a.warmup_score),
-    xp_earned: 0,
-  }));
+  const recentRuns = recentActivities
+    .slice(0, 10)
+    .map((a) => buildRecentRunSummary(a, units));
 
   return {
     runner,

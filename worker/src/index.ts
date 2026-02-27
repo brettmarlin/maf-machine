@@ -272,7 +272,7 @@ async function processWebhookActivity(
         gameState,
         settings,
         gameResult.xp_earned,
-        gameResult.xp_breakdown,
+        gameResult.xp_breakdown as unknown as Record<string, number>,
         gameResult.milestones_unlocked,
         gameResult.quest_completed
       );
@@ -586,13 +586,13 @@ export default {
 
       const contextParts: string[] = [];
       if (settings) {
-        contextParts.push(`Runner: age ${settings.age}, MAF HR ${settings.maf_hr}, zone ${settings.maf_zone_low}-${settings.maf_zone_high}`);
+        contextParts.push(`Runner: age ${settings.age}, MAF HR ${settings.maf_hr}, ceiling ${settings.maf_hr} bpm (do not exceed)`);
       }
       contextParts.push(`Level ${gameState.xp_total > 0 ? Math.floor(gameState.xp_total / 500) + 1 : 1}, ${gameState.xp_total} XP, ${gameState.streak_current_weeks}-week streak`);
 
       if (recentActivities.length > 0) {
         const latest = recentActivities[0];
-        contextParts.push(`Latest run: ${latest.zone_minutes.toFixed(1)} zone min, ${latest.time_in_maf_zone_pct.toFixed(0)}% in zone, drift ${latest.cardiac_drift.toFixed(1)}%`);
+        contextParts.push(`Latest run: ${latest.zone_minutes.toFixed(1)} min below ceiling, ${latest.time_below_ceiling_pct.toFixed(0)}% compliant, drift ${(latest.cardiac_drift || 0).toFixed(1)}%`);
       }
 
       // Find latest coaching for additional context
@@ -973,7 +973,6 @@ export default {
         age: number;
         modifier: number;
         units: 'km' | 'mi';
-        qualifying_tolerance?: number;
         start_date?: string | null;
       };
 
@@ -985,16 +984,15 @@ export default {
       }
 
       const mafHr = 180 - body.age + body.modifier;
-      const qualifyingTolerance = body.qualifying_tolerance ?? 10;
 
       const settings = {
         age: body.age,
         modifier: body.modifier,
         units: body.units || 'km',
         maf_hr: mafHr,
-        maf_zone_low: mafHr - 5,
-        maf_zone_high: mafHr + 5,
-        qualifying_tolerance: qualifyingTolerance,
+
+
+
         start_date: body.start_date || null,
       };
 

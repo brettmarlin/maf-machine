@@ -43,7 +43,7 @@ export interface WeekEndResult {
 export function updateWeeklyProgress(
   activity: MAFActivity,
   gameState: GameState,
-  mafZoneHigh: number
+  mafCeiling: number
 ): WeeklyProgressUpdate {
   const runDate = new Date(activity.date);
   const week = getISOWeek(runDate);
@@ -70,8 +70,8 @@ export function updateWeeklyProgress(
     existing.qualifying_runs += 1;
   }
 
-  // Pure MAF check: avg HR must be ≤ maf_zone_high + 5
-  if (activity.avg_hr > mafZoneHigh + 5) {
+  // Pure MAF check: avg HR must be ≤ ceiling + 5
+  if (activity.avg_hr > mafCeiling + 5) {
     existing.pure_maf = false;
   }
 

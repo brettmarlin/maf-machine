@@ -1,5 +1,5 @@
 // worker/src/lib/mafAnalysis.ts
-// Server-side MAF analysis engine — v2 enhanced metrics
+// Server-side MAF analysis engine — v2 ceiling model
 // This is the single source of truth for the MAFActivity interface.
 // Every downstream module (XP, quests, streaks, coaching) imports from here.
 
@@ -9,11 +9,28 @@ export interface UserSettings {
   age: number;
   modifier: number;
   units: 'km' | 'mi';
-  maf_hr: number;
-  maf_zone_low: number;
-  maf_zone_high: number;
-  qualifying_tolerance: number;
+  maf_hr: number;            // 180 - age + modifier = CEILING
   start_date: string | null;
+}
+
+export interface MAFTiers {
+  ceiling: number;            // maf_hr (e.g., 131) — do not cross
+  controlled_low: number;     // ceiling - 6 (e.g., 125)
+  controlled_high: number;    // ceiling - 1 (e.g., 130)
+  easy_low: number;           // ceiling - 13 (e.g., 118)
+  easy_high: number;          // ceiling - 7 (e.g., 124)
+  recovery_below: number;     // ceiling - 13 (e.g., 118)
+}
+
+export function computeMAFTiers(maf_hr: number): MAFTiers {
+  return {
+    ceiling: maf_hr,
+    controlled_low: maf_hr - 6,
+    controlled_high: maf_hr - 1,
+    easy_low: maf_hr - 13,
+    easy_high: maf_hr - 7,
+    recovery_below: maf_hr - 13,
+  };
 }
 
 export interface StreamData {
@@ -42,9 +59,9 @@ export interface StravaActivity {
 /**
  * MAFActivity — the core analysis result for a single run.
  *
- * v1 fields are used by the existing frontend dashboard.
- * v2 fields power the gamification and coaching engines.
- * All downstream modules import this interface.
+ * Ceiling model: maf_hr is the cap. Everything at or below is good.
+ * Tiers: controlled (ceiling-6 to ceiling-1), easy (ceiling-13 to ceiling-7), recovery (below).
+ * Over ceiling = not aerobic training.
  */
 export interface MAFActivity {
   // Identity
@@ -55,27 +72,40 @@ export interface MAFActivity {
   distance_meters: number;
   elevation_gain: number;
 
-  // v1 metrics (existing dashboard)
+  // Core HR metrics
   avg_hr: number;
   avg_cadence: number;
   avg_pace: number;              // min/unit
-  time_in_maf_zone_pct: number;  // 0–100
-  time_in_qualifying_zone_pct: number;
-  maf_pace: number;              // min/unit (pace while in MAF zone)
-  cardiac_drift: number | null;  // % HR creep first→second half
-  aerobic_decoupling: number | null; // % pace:HR ratio drift
-  cadence_in_zone: number | null;    // avg cadence in MAF zone (spm)
   efficiency_factor: number;     // meters/min per bpm
-  qualifying: boolean;           // ≥20 min && ≥60% in qualifying zone
+
+  // Ceiling compliance
+  time_below_ceiling_pct: number;   // % of run at or below ceiling (the main number)
+  time_over_ceiling_pct: number;    // % of run above ceiling
+  time_controlled_pct: number;      // % in controlled tier
+  time_easy_pct: number;            // % in easy tier
+  time_recovery_pct: number;        // % in recovery tier
+
+  // Pace metrics
+  maf_pace: number;                   // avg pace while below ceiling
+  cardiac_drift: number | null;
+  aerobic_decoupling: number | null;
+  cadence_in_zone: number | null;     // cadence while below ceiling
+  negative_split: boolean;
+  pace_steadiness_score: number;
+
+  // Discipline metrics
+  zone_minutes: number;               // minutes below ceiling
+  longest_zone_streak_minutes: number; // longest continuous stretch below ceiling
+  zone_entries: number;               // times HR dropped back below ceiling after spiking over
+  warmup_score: number;
+
+  // Status
+  qualifying: boolean;
   excluded: boolean;
 
-  // v2 metrics (gamification + coaching)
-  zone_minutes: number;                   // absolute minutes in MAF zone
-  longest_zone_streak_minutes: number;    // longest continuous in-zone stretch
-  zone_entries: number;                   // times HR re-entered zone after leaving
-  warmup_score: number;                   // 0–100
-  negative_split: boolean;                // second half ≥2% faster
-  pace_steadiness_score: number;          // 0–100
+  // Backward compat aliases (frontend v1 reads these)
+  time_in_maf_zone_pct: number;
+  time_in_qualifying_zone_pct: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -110,45 +140,86 @@ function coefficientOfVariation(arr: number[]): number {
   return Math.sqrt(variance) / avg;
 }
 
-// ─── V2 Metric Calculators ───────────────────────────────────────────────────
+// ─── Tier Bucketing ──────────────────────────────────────────────────────────
 
-/**
- * Zone minutes: total seconds where HR is in [zoneLow, zoneHigh], converted to minutes.
- * Assumes 1-second stream sampling (standard for Strava).
- */
-function computeZoneMinutes(
-  hr: number[],
-  zoneLow: number,
-  zoneHigh: number
-): number {
-  let inZoneSeconds = 0;
-  for (let i = 0; i < hr.length; i++) {
-    if (hr[i] >= zoneLow && hr[i] <= zoneHigh) {
-      inZoneSeconds++;
-    }
-  }
-  return inZoneSeconds / 60;
+interface TierBreakdown {
+  below_ceiling_pct: number;
+  over_ceiling_pct: number;
+  controlled_pct: number;
+  easy_pct: number;
+  recovery_pct: number;
 }
 
 /**
- * Zone streaks: scan HR stream for consecutive seconds in zone.
- * Returns longest continuous stretch (minutes) and number of zone entries.
+ * Single pass through HR stream — bucket each second into a tier.
  */
-function computeZoneStreaks(
+function computeTierBreakdown(hr: number[], tiers: MAFTiers): TierBreakdown {
+  if (hr.length === 0) {
+    return { below_ceiling_pct: 0, over_ceiling_pct: 0, controlled_pct: 0, easy_pct: 0, recovery_pct: 0 };
+  }
+
+  let over = 0;
+  let controlled = 0;
+  let easy = 0;
+  let recovery = 0;
+
+  for (let i = 0; i < hr.length; i++) {
+    const h = hr[i];
+    if (h > tiers.ceiling) {
+      over++;
+    } else if (h >= tiers.controlled_low) {
+      controlled++;
+    } else if (h >= tiers.easy_low) {
+      easy++;
+    } else {
+      recovery++;
+    }
+  }
+
+  const total = hr.length;
+  return {
+    below_ceiling_pct: ((controlled + easy + recovery) / total) * 100,
+    over_ceiling_pct: (over / total) * 100,
+    controlled_pct: (controlled / total) * 100,
+    easy_pct: (easy / total) * 100,
+    recovery_pct: (recovery / total) * 100,
+  };
+}
+
+// ─── Metric Calculators ─────────────────────────────────────────────────────
+
+/**
+ * Minutes below ceiling: total seconds where HR ≤ ceiling, converted to minutes.
+ */
+function computeBelowCeilingMinutes(hr: number[], ceiling: number): number {
+  let seconds = 0;
+  for (let i = 0; i < hr.length; i++) {
+    if (hr[i] <= ceiling) {
+      seconds++;
+    }
+  }
+  return seconds / 60;
+}
+
+/**
+ * Ceiling streaks: consecutive seconds at or below ceiling.
+ * Entry = HR drops back below ceiling after being over.
+ */
+function computeCeilingStreaks(
   hr: number[],
-  zoneLow: number,
-  zoneHigh: number
+  ceiling: number
 ): { longest_streak_minutes: number; zone_entries: number } {
   let longestStreak = 0;
   let currentStreak = 0;
   let entries = 0;
-  let wasInZone = false;
+  let wasBelow = false;
 
   for (let i = 0; i < hr.length; i++) {
-    const inZone = hr[i] >= zoneLow && hr[i] <= zoneHigh;
+    const below = hr[i] <= ceiling;
 
-    if (inZone) {
-      if (!wasInZone) {
+    if (below) {
+      if (!wasBelow && i > 0) {
+        // Came back below ceiling after being over
         entries++;
       }
       currentStreak++;
@@ -159,7 +230,7 @@ function computeZoneStreaks(
       currentStreak = 0;
     }
 
-    wasInZone = inZone;
+    wasBelow = below;
   }
 
   return {
@@ -170,20 +241,14 @@ function computeZoneStreaks(
 
 /**
  * Warm-up quality score (0–100).
- * From MAF tips: first 10–15 minutes should be gradual, HR ≥10 bpm below MAF max.
- *
- * Score = % of first 600 seconds where HR ≤ (maf_hr - 10).
- * Penalty: if HR spikes above maf_zone_high in first 300 seconds, score capped at 50.
+ * First 10 minutes should be gradual, HR ≥10 bpm below ceiling.
+ * Penalty: if HR spikes above ceiling in first 5 minutes, score capped at 50.
  */
-function computeWarmupScore(
-  hr: number[],
-  mafHr: number,
-  mafZoneHigh: number
-): number {
-  const warmupWindow = Math.min(hr.length, 600); // first 10 minutes
+function computeWarmupScore(hr: number[], ceiling: number): number {
+  const warmupWindow = Math.min(hr.length, 600);
   if (warmupWindow === 0) return 0;
 
-  const warmupTarget = mafHr - 10;
+  const warmupTarget = ceiling - 10;
   let belowTargetCount = 0;
   let earlySpike = false;
 
@@ -191,14 +256,12 @@ function computeWarmupScore(
     if (hr[i] <= warmupTarget) {
       belowTargetCount++;
     }
-    // Check for spike in first 5 minutes
-    if (i < 300 && hr[i] > mafZoneHigh) {
+    if (i < 300 && hr[i] > ceiling) {
       earlySpike = true;
     }
   }
 
   let score = (belowTargetCount / warmupWindow) * 100;
-
   if (earlySpike) {
     score = Math.min(score, 50);
   }
@@ -208,8 +271,7 @@ function computeWarmupScore(
 
 /**
  * Negative split detection.
- * Compare avg velocity in second half vs first half.
- * Negative split = true if second half is ≥2% faster.
+ * Second half ≥2% faster = true.
  */
 function computeNegativeSplit(velocity: number[]): boolean {
   const mid = Math.floor(velocity.length / 2);
@@ -217,46 +279,40 @@ function computeNegativeSplit(velocity: number[]): boolean {
 
   const firstHalf = mean(velocity.slice(0, mid));
   const secondHalf = mean(velocity.slice(mid));
-
   if (firstHalf <= 0) return false;
 
-  const improvement = (secondHalf - firstHalf) / firstHalf;
-  return improvement >= 0.02;
+  return (secondHalf - firstHalf) / firstHalf >= 0.02;
 }
 
 /**
  * Pace steadiness score (0–100).
- * Based on coefficient of variation of velocity within MAF zone segments.
- * Lower CV = more even pacing = better discipline.
- * Score = max(0, 100 - (CV × 500))
+ * CV of velocity while HR is at or below ceiling.
  */
 function computePaceSteadiness(
   velocity: number[],
   hr: number[],
-  zoneLow: number,
-  zoneHigh: number
+  ceiling: number
 ): number {
   const len = Math.min(velocity.length, hr.length);
-  const inZoneVelocities: number[] = [];
+  const belowCeilingVelocities: number[] = [];
 
   for (let i = 0; i < len; i++) {
-    if (hr[i] >= zoneLow && hr[i] <= zoneHigh && velocity[i] > 0) {
-      inZoneVelocities.push(velocity[i]);
+    if (hr[i] <= ceiling && velocity[i] > 0) {
+      belowCeilingVelocities.push(velocity[i]);
     }
   }
 
-  if (inZoneVelocities.length < 10) return 0; // not enough data
+  if (belowCeilingVelocities.length < 10) return 0;
 
-  const cv = coefficientOfVariation(inZoneVelocities);
-  const score = Math.max(0, 100 - cv * 500);
-  return Math.round(score);
+  const cv = coefficientOfVariation(belowCeilingVelocities);
+  return Math.round(Math.max(0, 100 - cv * 500));
 }
 
 // ─── Main Analysis Function ──────────────────────────────────────────────────
 
 /**
  * Analyze a single Strava activity with full stream data.
- * Produces the complete MAFActivity record used by all downstream systems.
+ * Uses ceiling model: maf_hr is the cap, everything below is good.
  */
 export function analyzeActivity(
   activity: StravaActivity,
@@ -264,8 +320,8 @@ export function analyzeActivity(
   settings: UserSettings,
   excluded: boolean = false
 ): MAFActivity {
-  const { maf_hr, maf_zone_low, maf_zone_high, qualifying_tolerance, units } = settings;
-  const qualifyingHigh = maf_zone_high + qualifying_tolerance;
+  const { maf_hr, units } = settings;
+  const tiers = computeMAFTiers(maf_hr);
 
   const avgPace = activity.average_speed > 0
     ? velocityToPace(activity.average_speed, units)
@@ -273,15 +329,15 @@ export function analyzeActivity(
 
   const ef = computeEF(activity.average_speed, activity.average_heartrate || 0);
 
-  // Defaults for when we have no stream data
-  let timeInZonePct = 0;
-  let timeInQualifyingPct = 0;
+  // Defaults for no stream data
+  let tierBreakdown: TierBreakdown = {
+    below_ceiling_pct: 0, over_ceiling_pct: 0,
+    controlled_pct: 0, easy_pct: 0, recovery_pct: 0,
+  };
   let mafPace = avgPace;
   let cardiacDrift: number | null = null;
   let aerobicDecoupling: number | null = null;
   let cadenceInZone: number | null = null;
-
-  // v2 defaults
   let zoneMinutes = 0;
   let longestZoneStreakMinutes = 0;
   let zoneEntries = 0;
@@ -295,51 +351,47 @@ export function analyzeActivity(
     const cadence = streams.cadence?.data;
     const len = Math.min(hr.length, velocity.length);
 
-    // ── v1 metrics ──────────────────────────────────────────────────────
+    // ── Tier breakdown (single pass) ────────────────────────────────────
+    tierBreakdown = computeTierBreakdown(hr.slice(0, len), tiers);
 
-    let inZoneCount = 0;
-    let inQualifyingCount = 0;
-    let inZonePaceSum = 0;
-    let inZoneCadenceSum = 0;
-    let inZoneCadenceCount = 0;
+    // ── Pace + cadence while below ceiling ──────────────────────────────
+    let belowCeilingPaceSum = 0;
+    let belowCeilingPaceCount = 0;
+    let belowCeilingCadenceSum = 0;
+    let belowCeilingCadenceCount = 0;
 
     for (let i = 0; i < len; i++) {
-      if (hr[i] >= maf_zone_low && hr[i] <= maf_zone_high) {
-        inZoneCount++;
+      if (hr[i] <= tiers.ceiling) {
         if (velocity[i] > 0) {
-          inZonePaceSum += velocityToPace(velocity[i], units);
+          belowCeilingPaceSum += velocityToPace(velocity[i], units);
+          belowCeilingPaceCount++;
         }
         if (cadence && cadence[i] > 0) {
-          inZoneCadenceSum += cadence[i] * 2;
-          inZoneCadenceCount++;
+          belowCeilingCadenceSum += cadence[i] * 2;
+          belowCeilingCadenceCount++;
         }
-      }
-      if (hr[i] >= maf_zone_low && hr[i] <= qualifyingHigh) {
-        inQualifyingCount++;
       }
     }
 
-    timeInZonePct = len > 0 ? (inZoneCount / len) * 100 : 0;
-    timeInQualifyingPct = len > 0 ? (inQualifyingCount / len) * 100 : 0;
-    mafPace = inZoneCount > 0 ? inZonePaceSum / inZoneCount : avgPace;
-    cadenceInZone = inZoneCadenceCount > 0 ? inZoneCadenceSum / inZoneCadenceCount : null;
+    mafPace = belowCeilingPaceCount > 0 ? belowCeilingPaceSum / belowCeilingPaceCount : avgPace;
+    cadenceInZone = belowCeilingCadenceCount > 0 ? belowCeilingCadenceSum / belowCeilingCadenceCount : null;
 
-    // Cardiac drift: HR creep first half vs second half
+    // ── Cardiac drift ───────────────────────────────────────────────────
     const midpoint = Math.floor(len / 2);
     if (midpoint > 0) {
       const firstHalfHr = mean(hr.slice(0, midpoint));
-      const secondHalfHr = mean(hr.slice(midpoint));
+      const secondHalfHr = mean(hr.slice(midpoint, len));
       cardiacDrift = firstHalfHr > 0
         ? ((secondHalfHr - firstHalfHr) / firstHalfHr) * 100
         : null;
     }
 
-    // Aerobic decoupling: pace:HR ratio drift
+    // ── Aerobic decoupling ──────────────────────────────────────────────
     if (midpoint > 0) {
       const firstHalfPace = mean(velocity.slice(0, midpoint));
-      const secondHalfPace = mean(velocity.slice(midpoint));
+      const secondHalfPace = mean(velocity.slice(midpoint, len));
       const firstHalfHrVal = mean(hr.slice(0, midpoint));
-      const secondHalfHrVal = mean(hr.slice(midpoint));
+      const secondHalfHrVal = mean(hr.slice(midpoint, len));
 
       if (firstHalfPace > 0 && firstHalfHrVal > 0) {
         const paceRatio = secondHalfPace / firstHalfPace;
@@ -348,38 +400,36 @@ export function analyzeActivity(
       }
     }
 
-    // ── v2 metrics ──────────────────────────────────────────────────────
+    // ── Discipline metrics ──────────────────────────────────────────────
+    zoneMinutes = computeBelowCeilingMinutes(hr.slice(0, len), tiers.ceiling);
 
-    zoneMinutes = computeZoneMinutes(hr, maf_zone_low, maf_zone_high);
-
-    const streaks = computeZoneStreaks(hr, maf_zone_low, maf_zone_high);
+    const streaks = computeCeilingStreaks(hr.slice(0, len), tiers.ceiling);
     longestZoneStreakMinutes = streaks.longest_streak_minutes;
     zoneEntries = streaks.zone_entries;
 
-    warmupScore = computeWarmupScore(hr, maf_hr, maf_zone_high);
-    negativeSplit = computeNegativeSplit(velocity);
-    paceSteadinessScore = computePaceSteadiness(velocity, hr, maf_zone_low, maf_zone_high);
+    warmupScore = computeWarmupScore(hr, tiers.ceiling);
+    negativeSplit = computeNegativeSplit(velocity.slice(0, len));
+    paceSteadinessScore = computePaceSteadiness(velocity, hr, tiers.ceiling);
 
   } else {
-    // No stream data — estimate from averages (v1 fallback)
+    // No stream data — estimate from averages
     if (activity.average_heartrate) {
-      const inZone = activity.average_heartrate >= maf_zone_low
-        && activity.average_heartrate <= maf_zone_high;
-      const inQualifying = activity.average_heartrate >= maf_zone_low
-        && activity.average_heartrate <= qualifyingHigh;
-      timeInZonePct = inZone ? 75 : 25;
-      timeInQualifyingPct = inQualifying ? 75 : 25;
-
-      // Rough zone minutes estimate from percentage
-      if (inZone) {
+      const belowCeiling = activity.average_heartrate <= maf_hr;
+      tierBreakdown.below_ceiling_pct = belowCeiling ? 75 : 25;
+      tierBreakdown.over_ceiling_pct = belowCeiling ? 25 : 75;
+      if (belowCeiling) {
         zoneMinutes = (activity.elapsed_time * 0.75) / 60;
       }
     }
   }
 
+  // Qualifying: ≥20 min AND ≥60% below ceiling AND avg HR ≤ ceiling
   const qualifying = !excluded
     && activity.elapsed_time >= 1200
-    && timeInQualifyingPct >= 60;
+    && tierBreakdown.below_ceiling_pct >= 60
+    && (activity.average_heartrate || 0) <= maf_hr;
+
+  const belowCeilingPct = tierBreakdown.below_ceiling_pct;
 
   return {
     // Identity
@@ -390,27 +440,40 @@ export function analyzeActivity(
     distance_meters: activity.distance,
     elevation_gain: activity.total_elevation_gain || 0,
 
-    // v1 metrics
+    // Core HR
     avg_hr: activity.average_heartrate || 0,
     avg_cadence: activity.average_cadence ? activity.average_cadence * 2 : 0,
     avg_pace: avgPace,
-    time_in_maf_zone_pct: timeInZonePct,
-    time_in_qualifying_zone_pct: timeInQualifyingPct,
+    efficiency_factor: ef,
+
+    // Ceiling compliance
+    time_below_ceiling_pct: belowCeilingPct,
+    time_over_ceiling_pct: tierBreakdown.over_ceiling_pct,
+    time_controlled_pct: tierBreakdown.controlled_pct,
+    time_easy_pct: tierBreakdown.easy_pct,
+    time_recovery_pct: tierBreakdown.recovery_pct,
+
+    // Pace
     maf_pace: mafPace,
     cardiac_drift: cardiacDrift,
     aerobic_decoupling: aerobicDecoupling,
     cadence_in_zone: cadenceInZone,
-    efficiency_factor: ef,
-    qualifying,
-    excluded,
+    negative_split: negativeSplit,
+    pace_steadiness_score: paceSteadinessScore,
 
-    // v2 metrics
+    // Discipline
     zone_minutes: zoneMinutes,
     longest_zone_streak_minutes: longestZoneStreakMinutes,
     zone_entries: zoneEntries,
     warmup_score: warmupScore,
-    negative_split: negativeSplit,
-    pace_steadiness_score: paceSteadinessScore,
+
+    // Status
+    qualifying,
+    excluded,
+
+    // Backward compat aliases
+    time_in_maf_zone_pct: belowCeilingPct,
+    time_in_qualifying_zone_pct: belowCeilingPct,
   };
 }
 
