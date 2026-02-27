@@ -50,7 +50,14 @@ function daysAgo(n: number): Date {
   return startOfDay(d)
 }
 
-export function getDefaultRange(): DateRange {
+export function getDefaultRange(trainingStartDate?: string | null): DateRange {
+  if (trainingStartDate) {
+    return {
+      start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
+      end: endOfDay(new Date()),
+      label: 'Since start date',
+    }
+  }
   return {
     start: daysAgo(90),
     end: endOfDay(new Date()),
@@ -252,6 +259,25 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
               Custom
             </button>
             <div className="h-px bg-gray-800 my-1" />
+            {trainingStartDate && (
+              <button
+                onClick={() => {
+                  onChange({
+                    start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
+                    end: endOfDay(new Date()),
+                    label: 'Since start date',
+                  })
+                  setOpen(false)
+                }}
+                className={`w-full text-left px-4 py-2 text-xs transition-colors ${
+                  value.label === 'Since start date'
+                    ? 'text-orange-400 bg-gray-800/50'
+                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                }`}
+              >
+                Since start date
+              </button>
+            )}
             {PRESETS.map((p) => (
               <button
                 key={p.label}

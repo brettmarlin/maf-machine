@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BASE_PATH } from '../config'
+import { computeMAFTiers } from '../lib/mafAnalysis'
 
 interface Settings {
   configured: boolean
@@ -7,10 +8,11 @@ interface Settings {
   modifier?: number
   units?: 'km' | 'mi'
   maf_hr?: number
+  start_date?: string | null
+  // Legacy fields (may still arrive from KV)
   maf_zone_low?: number
   maf_zone_high?: number
   qualifying_tolerance?: number
-  start_date?: string | null
 }
 
 const MODIFIERS = [
@@ -30,11 +32,12 @@ export function SettingsModal({
   const [age, setAge] = useState<number>(currentSettings?.age ?? 35)
   const [modifier, setModifier] = useState<number>(currentSettings?.modifier ?? 0)
   const [units, setUnits] = useState<'km' | 'mi'>(currentSettings?.units ?? 'mi')
-  const [tolerance, setTolerance] = useState<number>(currentSettings?.qualifying_tolerance ?? 10)
+  const [startDate, setStartDate] = useState<string>(currentSettings?.start_date ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const mafHr = 180 - age + modifier
+  const tiers = computeMAFTiers(mafHr)
 
   // Close on Escape
   useEffect(() => {
@@ -43,7 +46,7 @@ export function SettingsModal({
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [age, modifier, units, tolerance])
+  }, [age, modifier, units, startDate])
 
   async function handleSave() {
     setSaving(true)
@@ -57,7 +60,7 @@ export function SettingsModal({
           age,
           modifier,
           units,
-          qualifying_tolerance: tolerance,
+          start_date: startDate || null,
         }),
       })
 
@@ -155,36 +158,59 @@ export function SettingsModal({
             </div>
           </div>
 
-          {/* Qualifying Tolerance */}
+          {/* Training Start Date */}
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-gray-300">
-              Qualifying Tolerance: +{tolerance} bpm
-            </label>
+            <label className="block text-sm font-medium text-gray-300">MAF Training Start Date</label>
             <p className="text-xs text-gray-500">
-              Widens qualifying zone above MAF. Tighten as you improve.
+              When did you begin MAF training? Runs before this date are ignored.
             </p>
             <input
-              type="range"
-              min={0}
-              max={20}
-              step={1}
-              value={tolerance}
-              onChange={(e) => setTolerance(parseInt(e.target.value))}
-              className="w-full accent-orange-500"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 [color-scheme:dark]"
             />
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>0 (strict)</span>
-              <span>+20 bpm (wide)</span>
-            </div>
+            {startDate && (
+              <button
+                type="button"
+                onClick={() => setStartDate('')}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Clear start date
+              </button>
+            )}
           </div>
 
-          {/* MAF HR Preview */}
-          <div className="bg-gray-800 rounded-lg p-4 text-center space-y-1">
-            <p className="text-sm text-gray-400">Your MAF Heart Rate</p>
-            <p className="text-2xl font-bold text-orange-500">{mafHr} bpm</p>
-            <p className="text-xs text-gray-400">
-              Zone: {mafHr - 5} – {mafHr + 5} · Qualifying: to {mafHr + 5 + tolerance}
-            </p>
+          {/* MAF HR Preview — Ceiling Model */}
+          <div className="bg-gray-800 rounded-lg p-4 space-y-3">
+            <div className="text-center space-y-1">
+              <p className="text-sm text-gray-400">Your MAF Ceiling</p>
+              <p className="text-2xl font-bold text-orange-500">{mafHr} bpm</p>
+              <p className="text-xs text-gray-500">Do not exceed — everything below is good</p>
+            </div>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                  Controlled
+                </span>
+                <span className="text-gray-400">{tiers.controlled_low}–{tiers.controlled_high} bpm</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  Easy
+                </span>
+                <span className="text-gray-400">{tiers.easy_low}–{tiers.easy_high} bpm</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-gray-500"></span>
+                  Recovery
+                </span>
+                <span className="text-gray-400">below {tiers.recovery_below} bpm</span>
+              </div>
+            </div>
           </div>
 
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}

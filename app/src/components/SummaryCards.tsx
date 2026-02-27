@@ -7,8 +7,6 @@ interface Props {
   trends: MAFTrend[]
   units: 'km' | 'mi'
   mafHr: number
-  mafZoneLow: number
-  mafZoneHigh: number
 }
 
 type TrendDirection = 'improving' | 'plateau' | 'regressing' | 'insufficient'
@@ -67,7 +65,7 @@ function trendLabel(direction: TrendDirection, metric: string): string {
   return labels[metric]?.[direction] || direction
 }
 
-export function SummaryCards({ summary, trends, units, mafHr, mafZoneLow, mafZoneHigh }: Props) {
+export function SummaryCards({ summary, trends, units, mafHr }: Props) {
   // Build sparkline data from trends
   const hrData = trends.map((t) => ({ value: t.rollingHr ?? t.avgHr }))
   const cadenceData = trends.map((t) => ({ value: t.cadence }))
@@ -75,25 +73,23 @@ export function SummaryCards({ summary, trends, units, mafHr, mafZoneLow, mafZon
   const zoneData = trends.map((t) => ({ value: t.timeInZonePct }))
   const efData = trends.map((t) => ({ value: t.rollingEf ?? t.ef }))
 
-  // Qualifying runs as cumulative sparkline
   let qualCount = 0
   const qualData = trends.map((t) => {
     if (t.qualifying) qualCount++
     return { value: qualCount }
   })
 
-  // HR deviation from MAF
+  // HR deviation from ceiling
   const hrDeviation = summary.currentAvgHr !== null ? summary.currentAvgHr - mafHr : null
   const hrDeviationColor =
     hrDeviation !== null
-      ? Math.abs(hrDeviation) <= 3
-        ? 'text-green-400'
-        : Math.abs(hrDeviation) <= 5
+      ? hrDeviation <= 0
+        ? 'text-green-400'   // below ceiling = good
+        : hrDeviation <= 5
           ? 'text-yellow-400'
           : 'text-red-400'
       : 'text-gray-500'
 
-  // Cadence assessment
   const cadenceNote =
     summary.avgCadence !== null
       ? summary.avgCadence >= 170
@@ -121,10 +117,10 @@ export function SummaryCards({ summary, trends, units, mafHr, mafZoneLow, mafZon
             <p className={`text-xs mt-0.5 ${hrDeviationColor}`}>
               {hrDeviation !== null
                 ? hrDeviation > 0
-                  ? `+${hrDeviation.toFixed(0)} above target`
+                  ? `+${hrDeviation.toFixed(0)} above ceiling`
                   : hrDeviation < 0
-                    ? `${hrDeviation.toFixed(0)} below target`
-                    : 'On target'
+                    ? `${Math.abs(hrDeviation).toFixed(0)} below ceiling`
+                    : 'At ceiling'
                 : '—'}
             </p>
           </div>
@@ -168,17 +164,17 @@ export function SummaryCards({ summary, trends, units, mafHr, mafZoneLow, mafZon
           <Sparkline data={paceData} color="#f97316" />
         </div>
 
-        {/* % Time in Zone */}
+        {/* Below Ceiling % */}
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Time in Zone</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Below Ceiling</p>
           </div>
           <div>
             <p className="text-2xl font-bold">
               {summary.zoneDiscipline !== null ? `${summary.zoneDiscipline.toFixed(0)}%` : '—'}
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
-              In {mafZoneLow}–{mafZoneHigh}
+              ≤ {mafHr} bpm
             </p>
           </div>
           <Sparkline data={zoneData} color="#8b5cf6" />

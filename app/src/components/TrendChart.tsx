@@ -12,7 +12,7 @@ import {
   ReferenceLine,
 } from 'recharts'
 import type { MAFTrend } from '../lib/mafAnalysis'
-import { formatPace } from '../lib/mafAnalysis'
+import { formatPace, computeMAFTiers } from '../lib/mafAnalysis'
 
 type Overlay = 'pace' | 'ef' | 'cadence'
 
@@ -26,14 +26,14 @@ interface Props {
   trends: MAFTrend[]
   units: 'km' | 'mi'
   mafHr: number
-  mafZoneLow: number
-  mafZoneHigh: number
-  qualifyingHigh: number
 }
 
-export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qualifyingHigh }: Props) {
-  const [overlays, setOverlays] = useState<Set<Overlay>>(new Set())
+export function TrendChart({ trends, units, mafHr }: Props) {
+  // Default: HR always on + Pace overlay on
+  const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(['pace']))
   const [showRolling, setShowRolling] = useState(true)
+
+  const tiers = computeMAFTiers(mafHr)
 
   const toggleOverlay = (overlay: Overlay) => {
     const next = new Set(overlays)
@@ -42,7 +42,6 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
     setOverlays(next)
   }
 
-  // Chart data — trends are already filtered by date range in Dashboard
   const chartData = trends.map((t) => ({
     date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     rawDate: t.date,
@@ -58,10 +57,10 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
     timeInZonePct: t.timeInZonePct,
   }))
 
-  // HR Y-axis domain
+  // HR Y-axis domain — show from below easy tier to above ceiling
   const allHr = chartData.map((d) => d.avgHr).filter(Boolean)
-  const minHr = Math.min(...allHr, mafZoneLow - 5)
-  const maxHr = Math.max(...allHr, qualifyingHigh + 5)
+  const minHr = Math.min(...allHr, tiers.easy_low - 5)
+  const maxHr = Math.max(...allHr, tiers.ceiling + 10)
   const hrDomain: [number, number] = [Math.floor(minHr / 5) * 5, Math.ceil(maxHr / 5) * 5]
 
   const hasOverlay = overlays.size > 0
@@ -69,15 +68,17 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
     const data = payload[0]?.payload
+    const aboveCeiling = data.avgHr > mafHr
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm shadow-lg">
         <p className="text-gray-400 mb-2 font-medium">{label}</p>
-        <p className="text-red-400">
+        <p className={aboveCeiling ? 'text-red-400' : 'text-green-400'}>
           HR: <span className="font-semibold">{Math.round(data.avgHr)} bpm</span>
           {data.rollingHr && <span className="text-gray-500 ml-1">(avg: {Math.round(data.rollingHr)})</span>}
+          {aboveCeiling && <span className="text-red-500 ml-1">above ceiling</span>}
         </p>
         <p className="text-gray-500 text-xs">
-          Zone: {data.timeInZonePct?.toFixed(0)}% in target
+          Below ceiling: {data.timeInZonePct?.toFixed(0)}%
           {data.qualifying ? ' ✓' : ''}
         </p>
         {overlays.has('pace') && data.mafPace > 0 && (
@@ -186,18 +187,65 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
 
             <Tooltip content={<CustomTooltip />} />
 
-            {/* MAF Zone Band */}
-            <ReferenceArea yAxisId="hr" y1={mafZoneLow} y2={mafZoneHigh} fill="#22c55e" fillOpacity={0.08} stroke="none" />
-            <ReferenceArea yAxisId="hr" y1={mafZoneHigh} y2={qualifyingHigh} fill="#eab308" fillOpacity={0.04} stroke="none" />
+            {/* ─── Ceiling Model Visualization ─── */}
 
-            {/* MAF HR Target Line */}
-            <ReferenceLine
-              yAxisId="hr" y={mafHr} stroke="#22c55e" strokeDasharray="6 3" strokeWidth={1.5}
-              label={{ value: `MAF ${mafHr}`, fill: '#22c55e', fontSize: 10, position: 'left' }}
+            {/* Tier shading: Controlled (light green) */}
+            <ReferenceArea
+              yAxisId="hr"
+              y1={tiers.controlled_low}
+              y2={tiers.controlled_high}
+              fill="#22c55e"
+              fillOpacity={0.08}
+              stroke="none"
             />
-            <ReferenceLine yAxisId="hr" y={mafZoneLow} stroke="#22c55e" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.5} />
-            <ReferenceLine yAxisId="hr" y={mafZoneHigh} stroke="#22c55e" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.5} />
-            <ReferenceLine yAxisId="hr" y={qualifyingHigh} stroke="#eab308" strokeDasharray="2 4" strokeWidth={0.5} strokeOpacity={0.3} />
+
+            {/* Tier shading: Easy (light blue) */}
+            <ReferenceArea
+              yAxisId="hr"
+              y1={tiers.easy_low}
+              y2={tiers.easy_high}
+              fill="#3b82f6"
+              fillOpacity={0.05}
+              stroke="none"
+            />
+
+            {/* Over ceiling zone: red tint */}
+            <ReferenceArea
+              yAxisId="hr"
+              y1={tiers.ceiling}
+              y2={hrDomain[1]}
+              fill="#ef4444"
+              fillOpacity={0.04}
+              stroke="none"
+            />
+
+            {/* MAF Ceiling Line — the hard cap */}
+            <ReferenceLine
+              yAxisId="hr"
+              y={tiers.ceiling}
+              stroke="#ef4444"
+              strokeWidth={2}
+              strokeDasharray="6 3"
+              label={{ value: `Ceiling ${tiers.ceiling}`, fill: '#ef4444', fontSize: 10, position: 'left' }}
+            />
+
+            {/* Tier boundaries — subtle */}
+            <ReferenceLine
+              yAxisId="hr"
+              y={tiers.controlled_low}
+              stroke="#22c55e"
+              strokeDasharray="2 4"
+              strokeWidth={0.5}
+              strokeOpacity={0.4}
+            />
+            <ReferenceLine
+              yAxisId="hr"
+              y={tiers.easy_low}
+              stroke="#3b82f6"
+              strokeDasharray="2 4"
+              strokeWidth={0.5}
+              strokeOpacity={0.3}
+            />
 
             {/* Heart Rate */}
             <Scatter yAxisId="hr" dataKey="avgHr" fill="#ef4444" r={4} fillOpacity={0.7} name="Avg HR" />
@@ -240,16 +288,16 @@ export function TrendChart({ trends, units, mafHr, mafZoneLow, mafZoneHigh, qual
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 px-2">
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-green-500 opacity-30"></span>
-          MAF Zone ({mafZoneLow}–{mafZoneHigh})
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-yellow-500 opacity-30"></span>
-          Qualifying (to {qualifyingHigh})
-        </span>
-        <span className="flex items-center gap-1.5">
           <span className="w-3 h-0.5 bg-red-500 rounded"></span>
-          HR dots + rolling avg
+          Ceiling ({tiers.ceiling} bpm)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-green-500 opacity-30"></span>
+          Controlled ({tiers.controlled_low}–{tiers.controlled_high})
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-blue-500 opacity-30"></span>
+          Easy ({tiers.easy_low}–{tiers.easy_high})
         </span>
         {overlays.has('pace') && (
           <span className="flex items-center gap-1.5">

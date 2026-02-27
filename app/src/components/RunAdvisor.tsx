@@ -4,8 +4,6 @@ interface Props {
   summary: MAFSummary
   activities: MAFActivity[]
   mafHr: number
-  mafZoneLow: number
-  mafZoneHigh: number
   units: 'km' | 'mi'
 }
 
@@ -20,11 +18,9 @@ function generateAdvice(
   summary: MAFSummary,
   activities: MAFActivity[],
   mafHr: number,
-  mafZoneLow: number,
-  mafZoneHigh: number,
   units: 'km' | 'mi'
 ): Advice {
-  const zone = `${mafZoneLow}–${mafZoneHigh} bpm`
+  const ceiling = `${mafHr} bpm`
 
   // Days since last run
   const sorted = [...activities].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -42,35 +38,35 @@ function generateAdvice(
   const avgCadence = summary.avgCadence || 0
   const avgDecoupling = summary.avgDecoupling || 0
 
-  // Current avg HR relative to target
+  // Current avg HR relative to ceiling
   const hrDeviation = summary.currentAvgHr !== null ? summary.currentAvgHr - mafHr : 0
 
   // Priority 1: Consistency
   if (daysSinceLastRun >= 3) {
     return {
       headline: 'Time to Run!',
-      body: `It's been ${daysSinceLastRun} days since your last run. Get out for an easy 30–40 minute run. The key: keep your heart rate in the ${zone} zone. Walk uphills if needed — the pace doesn't matter, the HR does.`,
+      body: `It's been ${daysSinceLastRun} days since your last run. Get out for an easy 30–40 minute run. The key: keep your heart rate under ${ceiling}. Walk uphills if needed — the pace doesn't matter, staying below the ceiling does.`,
       focus: 'Consistency',
       color: 'border-yellow-500',
     }
   }
 
-  // Priority 2: HR too high — the primary concern
+  // Priority 2: HR too high — above ceiling
   if (hrDeviation > 5) {
     return {
       headline: 'Bring Your Heart Rate Down',
-      body: `Your average HR is running ${Math.round(hrDeviation)} bpm above your MAF target of ${mafHr}. This is the #1 thing to fix. Slow down significantly — walk if you have to. Your target zone is ${zone}. The pace will feel painfully slow at first, but that's the point. Your aerobic system needs this.`,
+      body: `Your average HR is running ${Math.round(hrDeviation)} bpm above your MAF ceiling of ${ceiling}. This is the #1 thing to fix. Slow down significantly — walk if you have to. Everything above ${ceiling} is no longer aerobic training. The pace will feel painfully slow at first, but that's the point.`,
       focus: 'HR Control',
       color: 'border-red-500',
     }
   }
 
-  // Priority 3: Zone discipline
+  // Priority 3: Time below ceiling too low
   if (avgZoneDiscipline < 60) {
     return {
-      headline: 'Stay in the Zone',
-      body: `Only ${avgZoneDiscipline.toFixed(0)}% of your run time is in the MAF zone (${zone}). You're likely starting too fast or pushing on hills. Warm up with 5 minutes of walking, then ease into a pace where your HR stays between ${mafZoneLow}–${mafZoneHigh}. Walk uphills. Target: >75% time in zone.`,
-      focus: 'Zone Discipline',
+      headline: 'Stay Below the Ceiling',
+      body: `Only ${avgZoneDiscipline.toFixed(0)}% of your run time is below your MAF ceiling of ${ceiling}. You're likely starting too fast or pushing on hills. Warm up with 5 minutes of walking, then ease into a pace where your HR stays under ${ceiling}. Walk uphills. Target: >75% below ceiling.`,
+      focus: 'Ceiling Discipline',
       color: 'border-red-500',
     }
   }
@@ -79,7 +75,7 @@ function generateAdvice(
   if (summary.hrTrendDirection === 'regressing') {
     return {
       headline: 'Recovery Week',
-      body: `Your heart rate is trending upward over the past 8 weeks — possible overtraining, poor sleep, illness, or heat stress. Consider a recovery week: 3 easy runs of 25–30 minutes max, keeping HR firmly in ${zone}. Reassess in 7 days.`,
+      body: `Your heart rate is trending upward over the past 8 weeks — possible overtraining, poor sleep, illness, or heat stress. Consider a recovery week: 3 easy runs of 25–30 minutes max, keeping HR firmly under ${ceiling}. Reassess in 7 days.`,
       focus: 'Recovery',
       color: 'border-red-500',
     }
@@ -89,7 +85,7 @@ function generateAdvice(
   if (avgCadence > 0 && avgCadence < 170) {
     return {
       headline: 'Work on Cadence',
-      body: `Your average cadence is ${Math.round(avgCadence)} spm, below the 170 target. Higher cadence at MAF HR means lighter, more efficient steps. Try a cadence drill: 30 seconds at 180+ spm every 5 minutes during your next run. Keep HR in ${zone}.`,
+      body: `Your average cadence is ${Math.round(avgCadence)} spm, below the 170 target. Higher cadence at MAF HR means lighter, more efficient steps. Try a cadence drill: 30 seconds at 180+ spm every 5 minutes during your next run. Keep HR under ${ceiling}.`,
       focus: 'Cadence',
       color: 'border-yellow-500',
     }
@@ -99,7 +95,7 @@ function generateAdvice(
   if (weeklyCount < 3 && summary.hrTrendDirection === 'plateau') {
     return {
       headline: 'Add Another Run',
-      body: `Your HR trend has plateaued and you're running ${weeklyCount}× per week. Adding a 4th easy run at MAF HR (${zone}) can help your aerobic system adapt faster. Duration: 40–60 minutes.`,
+      body: `Your HR trend has plateaued and you're running ${weeklyCount}× per week. Adding a 4th easy run under ${ceiling} can help your aerobic system adapt faster. Duration: 40–60 minutes.`,
       focus: 'Volume',
       color: 'border-yellow-500',
     }
@@ -113,7 +109,7 @@ function generateAdvice(
     const suggestedDuration = longestRecent > 0 ? Math.round(longestRecent / 60) + 10 : 50
     return {
       headline: 'Extend Your Long Run',
-      body: `Your aerobic system is adapting well — HR is dropping and decoupling is under 5%. Try ${suggestedDuration} minutes this week at MAF HR (${zone}). Your body is ready for more volume.`,
+      body: `Your aerobic system is adapting well — HR is dropping and decoupling is under 5%. Try ${suggestedDuration} minutes this week, keeping HR under ${ceiling}. Your body is ready for more volume.`,
       focus: 'Duration',
       color: 'border-green-500',
     }
@@ -122,7 +118,7 @@ function generateAdvice(
   if (summary.hrTrendDirection === 'improving') {
     return {
       headline: 'Keep It Up!',
-      body: `Your heart rate is trending down — your aerobic system is building. Stay consistent with your current training at ${zone}. No changes needed, just patience.`,
+      body: `Your heart rate is trending down — your aerobic system is building. Stay consistent with your current training under ${ceiling}. No changes needed, just patience.`,
       focus: 'Consistency',
       color: 'border-green-500',
     }
@@ -130,14 +126,14 @@ function generateAdvice(
 
   return {
     headline: 'Stay Consistent',
-    body: `Keep running 3–4 times per week with your heart rate in ${zone}. Focus on the HR, not the pace. Walk uphills, slow down on hot days. Progress takes patience — trust the process.`,
+    body: `Keep running 3–4 times per week with your heart rate under ${ceiling}. Focus on the HR, not the pace. Walk uphills, slow down on hot days. Progress takes patience — trust the process.`,
     focus: 'Consistency',
     color: 'border-gray-500',
   }
 }
 
-export function RunAdvisor({ summary, activities, mafHr, mafZoneLow, mafZoneHigh, units }: Props) {
-  const advice = generateAdvice(summary, activities, mafHr, mafZoneLow, mafZoneHigh, units)
+export function RunAdvisor({ summary, activities, mafHr, units }: Props) {
+  const advice = generateAdvice(summary, activities, mafHr, units)
 
   return (
     <div className={`bg-gray-900 border-l-4 ${advice.color} rounded-lg p-5 space-y-2`}>

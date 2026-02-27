@@ -24,10 +24,11 @@ interface Settings {
   modifier?: number
   units?: 'km' | 'mi'
   maf_hr?: number
+  start_date?: string | null
+  // Legacy fields (may still arrive from KV, ignored)
   maf_zone_low?: number
   maf_zone_high?: number
   qualifying_tolerance?: number
-  start_date?: string | null
 }
 
 export function Dashboard({
@@ -38,21 +39,18 @@ export function Dashboard({
   onSettingsChange: (s: Settings) => void
 }) {
   const [settings, setSettings] = useState<Settings>(initialSettings)
-  // allActivities = full local cache of every analyzed activity
   const [allActivities, setAllActivities] = useState<MAFActivity[]>([])
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(!initialSettings.configured)
-  const [dateRange, setDateRange] = useState<DateRange>(getDefaultRange)
+  const [dateRange, setDateRange] = useState<DateRange>(() =>
+    getDefaultRange(initialSettings.start_date)
+  )
   const lastSyncRange = useRef<string>('')
 
   const units = settings.units || 'mi'
   const mafHr = settings.maf_hr || 145
-  const mafZoneLow = settings.maf_zone_low || 140
-  const mafZoneHigh = settings.maf_zone_high || 150
-  const qualifyingTolerance = settings.qualifying_tolerance ?? 10
-  const qualifyingHigh = mafZoneHigh + qualifyingTolerance
   const age = settings.age ?? 35
 
   // Filter the full cache by the current date range for display
@@ -92,7 +90,6 @@ export function Dashboard({
     setSyncStatus('Fetching activities from Strava...')
 
     try {
-      // Only fetch activities within the date range
       const afterTs = Math.floor(range.start.getTime() / 1000)
       const res = await fetch(`${BASE_PATH}/api/activities?after=${afterTs}`)
       if (!res.ok) throw new Error('Failed to fetch activities')
@@ -105,7 +102,6 @@ export function Dashboard({
         JSON.parse(localStorage.getItem('maf_excluded') || '[]')
       )
 
-      // Check which activities we already have analyzed in cache
       const cachedMap = new Map(allActivities.map((a) => [a.id, a]))
       const toAnalyze = rawActivities.filter((a: any) => !cachedMap.has(a.id))
       const alreadyCached = rawActivities
@@ -139,16 +135,12 @@ export function Dashboard({
             activity,
             streams,
             mafHr,
-            mafZoneLow,
-            mafZoneHigh,
-            qualifyingTolerance,
             units,
             excludedIds.has(activity.id)
           )
         )
       }
 
-      // Merge all into cache
       mergeIntoCache([...alreadyCached, ...analyzed])
       setSyncStatus(
         toAnalyze.length > 0
@@ -180,9 +172,13 @@ export function Dashboard({
       const updated = prev.map((a) =>
         a.id === id ? { ...a, excluded: excludedIds.has(id) } : a
       )
+      // Recheck qualifying with ceiling model
       const rechecked = updated.map((a) => ({
         ...a,
-        qualifying: !a.excluded && a.duration_seconds >= 1200 && a.time_in_qualifying_zone_pct >= 60,
+        qualifying: !a.excluded
+          && a.duration_seconds >= 1200
+          && a.time_below_ceiling_pct >= 60
+          && a.avg_hr <= mafHr,
       }))
       localStorage.setItem('maf_activities', JSON.stringify(rechecked))
       return rechecked
@@ -207,10 +203,8 @@ export function Dashboard({
   useEffect(() => {
     const rangeKey = dateRange.start.toISOString()
     if (lastSyncRange.current && rangeKey < lastSyncRange.current) {
-      // Range expanded earlier than what we've synced — need to fetch more
       syncActivities(dateRange)
     }
-    // If range narrowed or stayed the same, local filtering handles it
   }, [dateRange])
 
   function handleSettingsClose(updated: Settings | null) {
@@ -220,6 +214,8 @@ export function Dashboard({
       // Settings changed — re-analyze everything
       localStorage.removeItem('maf_activities')
       setAllActivities([])
+      // Reset date range to reflect new start_date
+      setDateRange(getDefaultRange(updated.start_date))
     }
     setShowSettings(false)
     if (updated) {
@@ -245,11 +241,11 @@ export function Dashboard({
             onClick={() => setShowSettings(true)}
             className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-3 py-1.5 rounded-lg transition-colors"
           >
-            <span className="text-gray-400">My MAF:</span>
+            <span className="text-gray-400">MAF Ceiling:</span>
             <span className="text-white font-medium">
-              {age} YRs = {mafHr} BPM
+              {mafHr} bpm
             </span>
-            <span className="text-gray-500">±{mafZoneHigh - mafHr}</span>
+            <span className="text-gray-500">({age} yrs)</span>
           </button>
 
           {/* Right: Date range + actions */}
@@ -257,9 +253,9 @@ export function Dashboard({
             <DateRangePicker
               value={dateRange}
               onChange={setDateRange}
+              trainingStartDate={settings.start_date}
             />
 
-            {/* Sync */}
             <button
               onClick={() => syncActivities(dateRange)}
               disabled={syncing}
@@ -268,7 +264,6 @@ export function Dashboard({
               {syncing ? '↻' : '↻ Sync'}
             </button>
 
-            {/* Logout */}
             <a
               href={`${BASE_PATH}/api/auth/logout`}
               className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
@@ -301,8 +296,6 @@ export function Dashboard({
             trends={filteredTrends}
             units={units}
             mafHr={mafHr}
-            mafZoneLow={mafZoneLow}
-            mafZoneHigh={mafZoneHigh}
           />
         )}
 
@@ -312,9 +305,6 @@ export function Dashboard({
             trends={filteredTrends}
             units={units}
             mafHr={mafHr}
-            mafZoneLow={mafZoneLow}
-            mafZoneHigh={mafZoneHigh}
-            qualifyingHigh={qualifyingHigh}
           />
         )}
 
@@ -324,8 +314,6 @@ export function Dashboard({
             summary={filteredSummary}
             activities={filteredActivities}
             mafHr={mafHr}
-            mafZoneLow={mafZoneLow}
-            mafZoneHigh={mafZoneHigh}
             units={units}
           />
         )}
@@ -339,7 +327,7 @@ export function Dashboard({
               </h2>
               <div className="flex items-center gap-4 text-xs text-gray-600">
                 <span>HR</span>
-                <span>Zone</span>
+                <span>Below</span>
                 <span>Pace</span>
                 <span>EF</span>
               </div>
@@ -371,10 +359,11 @@ export function Dashboard({
                     </a>
                   </span>
 
+                  {/* HR coloring: at or below ceiling = green, above = red */}
                   <span className={`w-16 text-right font-medium ${
-                    a.avg_hr >= mafZoneLow && a.avg_hr <= mafZoneHigh
+                    a.avg_hr <= mafHr
                       ? 'text-green-400'
-                      : a.avg_hr <= qualifyingHigh
+                      : a.avg_hr <= mafHr + 5
                         ? 'text-yellow-400'
                         : 'text-red-400'
                   }`}>
@@ -382,7 +371,7 @@ export function Dashboard({
                   </span>
 
                   <span className="w-12 text-right text-gray-500">
-                    {a.time_in_maf_zone_pct.toFixed(0)}%
+                    {a.time_below_ceiling_pct.toFixed(0)}%
                   </span>
 
                   <span className="w-20 text-right text-gray-500">
