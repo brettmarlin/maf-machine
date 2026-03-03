@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { BADGES, getBadgeDef } from '../lib/gameTypes'
+import { BADGES } from '../lib/gameTypes'
 import type { BadgeDefinition, BadgeCategory } from '../lib/gameTypes'
 
 const CATEGORY_ORDER: BadgeCategory[] = ['first_run', 'discipline', 'consistency', 'volume', 'maf_test']
@@ -161,7 +161,6 @@ export function GameCard({ game: externalGame, loading }: Props) {
                   const weekNum = i + 1
                   const isCompleted = weekNum <= completed
                   const isCurrent = weekNum === currentWeekNum
-                  const isFuture = weekNum > currentWeekNum
                   const milestone = STREAK_MILESTONES.find((m) => m.week === weekNum)
                   const milestoneEarned = milestone ? game.badges_earned.includes(milestone.badgeId) : false
 

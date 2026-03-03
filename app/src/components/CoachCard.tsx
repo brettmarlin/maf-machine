@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { BASE_PATH } from '../config'
-import { getBadgeDef } from '../lib/gameTypes'
 
 interface CoachingData {
   activity_id: number
