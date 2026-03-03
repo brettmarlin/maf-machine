@@ -5,6 +5,7 @@
 import type { MAFActivity } from './mafAnalysis';
 import type { GameState, WeeklyRecord } from './gameTypes';
 import { getISOWeek, getStreakMultiplier } from './gameTypes';
+import { getConsistencyBadges } from './badgeEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ export interface WeeklyProgressUpdate {
 export interface WeekEndResult {
   /** Whether the weekly target was met */
   target_met: boolean;
-  /** Bonus XP from weekly goals */
+  /** Bonus points from weekly goals */
   weekly_bonus_xp: number;
   /** Updated streak count */
   new_streak_weeks: number;
@@ -30,20 +31,22 @@ export interface WeekEndResult {
   streak_multiplier: number;
   /** Whether this was a pure MAF week */
   pure_maf: boolean;
+  /** Whether streak is frozen (ran but didn't hit target) */
+  frozen: boolean;
+  /** Consistency badge IDs earned from this streak milestone */
+  consistency_badge_ids: string[];
 }
 
 // ─── Weekly Progress ──────────────────────────────────────────────────────────
 
 /**
- * Update weekly progress when a new qualifying run arrives.
+ * Update weekly progress when a new run arrives.
  * Called per-run by the game state orchestrator.
- *
- * Returns the updated weekly record for the run's ISO week.
  */
 export function updateWeeklyProgress(
   activity: MAFActivity,
   gameState: GameState,
-  mafCeiling: number
+  mafCeiling: number,
 ): WeeklyProgressUpdate {
   const runDate = new Date(activity.date);
   const week = getISOWeek(runDate);
@@ -87,33 +90,33 @@ export function updateWeeklyProgress(
 
 /**
  * Evaluate end-of-week results.
- * Called when we detect the week has ended (a run arrives in a new week)
- * or on a manual weekly summary trigger.
+ * Called when we detect the week has ended (a run arrives in a new week).
  *
- * Computes weekly bonus XP and updates streak.
+ * Computes weekly bonus points, updates streak, and returns any
+ * consistency badges earned from streak milestones.
  */
 export function evaluateWeekEnd(
   completedWeek: WeeklyRecord,
-  gameState: GameState
+  gameState: GameState,
 ): WeekEndResult {
   let weeklyBonusXP = 0;
 
-  // Weekly target hit: 100 XP
+  // Weekly target hit: 100 points
   if (completedWeek.target_met) {
     weeklyBonusXP += 100;
   }
 
-  // Exceeded target by 50%: 50 bonus XP
+  // Exceeded target by 50%: 50 bonus
   if (completedWeek.zone_minutes >= gameState.weekly_target_zone_minutes * 1.5) {
     weeklyBonusXP += 50;
   }
 
-  // Pure MAF week: 50 bonus XP
+  // Pure MAF week: 50 bonus
   if (completedWeek.pure_maf && completedWeek.qualifying_runs > 0) {
     weeklyBonusXP += 50;
   }
 
-  // 3+ qualifying runs: 25 bonus XP
+  // 3+ qualifying runs: 25 bonus
   if (completedWeek.qualifying_runs >= 3) {
     weeklyBonusXP += 25;
   }
@@ -122,6 +125,7 @@ export function evaluateWeekEnd(
 
   let newStreakWeeks = gameState.streak_current_weeks;
   let newStreakLongest = gameState.streak_longest;
+  let frozen = false;
 
   if (completedWeek.target_met) {
     // Target met → streak continues
@@ -131,7 +135,7 @@ export function evaluateWeekEnd(
     }
   } else if (completedWeek.runs > 0) {
     // Ran but didn't hit target → streak freeze (pauses, doesn't reset)
-    // No change to streak count, but no multiplier benefit either
+    frozen = true;
   } else {
     // Didn't run at all → streak resets
     newStreakWeeks = 0;
@@ -141,6 +145,19 @@ export function evaluateWeekEnd(
     ? getStreakMultiplier(newStreakWeeks)
     : 1.0;
 
+  // ── Consistency badges from streak milestones ───────────────────────────
+
+  const consistencyBadges = getConsistencyBadges(
+    newStreakWeeks,
+    completedWeek.target_met,
+    gameState.badges_earned,
+  );
+
+  // Add consistency badge points to weekly bonus
+  for (const badge of consistencyBadges) {
+    weeklyBonusXP += badge.points_reward;
+  }
+
   return {
     target_met: completedWeek.target_met,
     weekly_bonus_xp: weeklyBonusXP,
@@ -148,24 +165,24 @@ export function evaluateWeekEnd(
     new_streak_longest: newStreakLongest,
     streak_multiplier: streakMultiplier,
     pure_maf: completedWeek.pure_maf,
+    frozen,
+    consistency_badge_ids: consistencyBadges.map((b) => b.id),
   };
 }
 
 /**
  * Check if a previous week needs evaluation.
- * When a run arrives in a new week, the prior week may need to be finalized.
- *
  * Returns the week string that needs evaluation, or null if none.
  */
 export function getPendingWeekEvaluation(
   currentRunWeek: string,
-  gameState: GameState
+  gameState: GameState,
 ): string | null {
   if (gameState.weekly_history.length === 0) return null;
 
   // Find the most recent week in history
   const sorted = [...gameState.weekly_history].sort((a, b) =>
-    b.week.localeCompare(a.week)
+    b.week.localeCompare(a.week),
   );
   const lastWeek = sorted[0];
 

@@ -6,21 +6,24 @@ import type { MAFActivity, UserSettings } from './mafAnalysis';
 import type {
   GameState,
   WeeklyRecord,
-  QuestId,
   RunXPResult,
+  BadgeDefinition,
 } from './gameTypes';
 import {
   createInitialGameState,
   getLevelFromXP,
   getXPToNextLevel,
+  getLevelProgressPct,
   getStreakMultiplier,
   getISOWeek,
-  getQuestDef,
-  MILESTONES,
+  BADGES,
+  LEVEL_TABLE,
 } from './gameTypes';
 import { calculateRunXP } from './xpEngine';
-import { checkQuestProgress, completeFirstStepsQuest } from './questEngine';
-import type { QuestUpdate } from './questEngine';
+import { detectSurpriseBonuses } from './xpEngine';
+import type { SurpriseBonus } from './xpEngine';
+import { checkBadges, checkSetupBadge, getConsistencyBadges } from './badgeEngine';
+import type { BadgeCheckResult } from './badgeEngine';
 import {
   updateWeeklyProgress,
   evaluateWeekEnd,
@@ -30,28 +33,38 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ProcessRunResult {
-  xp_earned: number;           // after streak multiplier
+  xp_earned: number;
   xp_breakdown: RunXPResult;
   streak_multiplier: number;
-  milestones_unlocked: string[];
-  quest_completed: QuestId | null;
-  quest_xp: number;
+  badges_earned: BadgeDefinition[];
+  surprise_bonuses: SurpriseBonus[];
   weekly_bonus_xp: number;
   level_before: number;
   level_after: number;
   game_state: GameState;
 }
 
+export interface NextStep {
+  priority: 'streak' | 'badge' | 'level' | 'weekly' | 'encouragement';
+  message: string;
+  detail?: string;
+}
+
 export interface GameAPIResponse {
-  xp_total: number;
+  // Level (no XP numbers exposed)
   level: number;
   level_name: string;
-  xp_to_next_level: number;
+  level_progress_pct: number;          // 0-100 progress toward next level
+  next_level_name: string | null;
+
+  // Streak
   streak: {
     current: number;
     longest: number;
-    multiplier: number;
+    frozen: boolean;
   };
+
+  // Weekly
   weekly: {
     zone_minutes: number;
     target: number;
@@ -59,6 +72,22 @@ export interface GameAPIResponse {
     qualifying_runs: number;
     days_left: number;
   };
+
+  // Badges
+  badges_earned: string[];              // Badge IDs
+  badges_recent: string[];              // Last 3 badge IDs (for display)
+
+  // Next step
+  next_step: NextStep;
+
+  // Lifetime stats
+  total_zone_minutes: number;
+  total_qualifying_runs: number;
+  lifetime_total_runs: number;
+
+  // v1 compat (GameCard.tsx still uses these until Step 7)
+  xp_total: number;
+  xp_to_next_level: number;
   quest_active: {
     id: string;
     name: string;
@@ -67,8 +96,6 @@ export interface GameAPIResponse {
   } | null;
   recent_milestones: string[];
   badges: string[];
-  total_zone_minutes: number;
-  total_qualifying_runs: number;
 }
 
 // ─── KV Operations ────────────────────────────────────────────────────────────
@@ -77,7 +104,7 @@ const MAX_WEEKLY_HISTORY = 52;
 
 export async function loadGameState(
   kv: KVNamespace,
-  athleteId: string
+  athleteId: string,
 ): Promise<GameState> {
   const raw = await kv.get(`${athleteId}:game`);
   if (!raw) return createInitialGameState();
@@ -94,7 +121,7 @@ export async function loadGameState(
 export async function saveGameState(
   kv: KVNamespace,
   athleteId: string,
-  state: GameState
+  state: GameState,
 ): Promise<void> {
   // Trim weekly history to last 52 weeks
   if (state.weekly_history.length > MAX_WEEKLY_HISTORY) {
@@ -103,37 +130,45 @@ export async function saveGameState(
       .slice(0, MAX_WEEKLY_HISTORY);
   }
 
+  state.updated_at = new Date().toISOString();
   await kv.put(`${athleteId}:game`, JSON.stringify(state));
 }
 
 // ─── Process New Run ──────────────────────────────────────────────────────────
 
 /**
- * Process a new run through the full game pipeline:
- * 1. Calculate XP
+ * Process a new run through the full v2 game pipeline:
+ * 1. Calculate base points
  * 2. Update weekly progress
- * 3. Evaluate prior week if needed (streak + weekly bonuses)
- * 4. Check quest progress
- * 5. Check milestone unlocks
+ * 3. Evaluate prior week (streak + weekly bonuses + consistency badges)
+ * 4. Check badge triggers
+ * 5. Detect surprise bonuses (personal records)
  * 6. Apply streak multiplier
- * 7. Update and save game state
+ * 7. Update personal records
+ * 8. Save game state
  */
 export async function processNewRun(
   kv: KVNamespace,
   athleteId: string,
   activity: MAFActivity,
-  settings: UserSettings
+  settings: UserSettings,
 ): Promise<ProcessRunResult> {
   const state = await loadGameState(kv, athleteId);
   const levelBefore = getLevelFromXP(state.xp_total).level;
 
-  // 1. Calculate base XP
+  // Track last run date for comeback detection
+  const lastRunDate = state.updated_at || null;
+
+  // 1. Calculate base points
   const xpResult = calculateRunXP(activity);
-  let totalXPEarned = xpResult.total_xp;
   let weeklyBonusXP = 0;
+  const allBadgesEarned: BadgeDefinition[] = [];
 
   // 2. Update weekly progress
   const weeklyUpdate = updateWeeklyProgress(activity, state, settings.maf_hr);
+
+  // 3. Check if prior week needs evaluation BEFORE adding current week to history
+  const pendingWeek = getPendingWeekEvaluation(weeklyUpdate.week, state);
 
   // Apply weekly update to state
   if (weeklyUpdate.is_new_week) {
@@ -145,8 +180,7 @@ export async function processNewRun(
     }
   }
 
-  // 3. Evaluate prior week if this run starts a new week
-  const pendingWeek = getPendingWeekEvaluation(weeklyUpdate.week, state);
+  // Evaluate prior week if needed
   if (pendingWeek && pendingWeek !== weeklyUpdate.week) {
     const priorRecord = state.weekly_history.find((w) => w.week === pendingWeek);
     if (priorRecord) {
@@ -155,42 +189,50 @@ export async function processNewRun(
       weeklyBonusXP = weekResult.weekly_bonus_xp;
       state.streak_current_weeks = weekResult.new_streak_weeks;
       state.streak_longest = weekResult.new_streak_longest;
+      state.streak.current_weeks = weekResult.new_streak_weeks;
+      state.streak.longest_ever = weekResult.new_streak_longest;
+      state.streak.frozen = weekResult.frozen;
 
       if (weekResult.target_met) {
         state.streak_last_qualified_week = pendingWeek;
+        state.streak.last_qualified_week = pendingWeek;
       }
 
-      // Update the prior week's record with XP earned
+      // Consistency badges from streak milestones
+      for (const badgeId of weekResult.consistency_badge_ids) {
+        if (!state.badges_earned.includes(badgeId)) {
+          state.badges_earned.push(badgeId);
+          const badge = BADGES.find((b) => b.id === badgeId);
+          if (badge) allBadgesEarned.push(badge);
+        }
+      }
+
       priorRecord.xp_earned += weeklyBonusXP;
-
-      // Check first_full_week quest
-      if (weekResult.target_met && state.quest_active === 'first_full_week') {
-        const questProgress = state.quest_progress['first_full_week'] || 0;
-        state.quest_progress['first_full_week'] = questProgress + 1;
-      }
     }
   }
 
-  // 4. Apply streak multiplier to run XP
-  const streakMultiplier = getStreakMultiplier(state.streak_current_weeks);
-  const multipliedRunXP = Math.floor(totalXPEarned * streakMultiplier);
-
-  // 5. Check quest progress
-  const questUpdate = checkQuestProgress(activity, state);
-
-  // 6. Check milestone unlocks
-  const newMilestones = checkMilestones(activity, state);
-
-  // 7. Apply all updates to state
-
-  // XP: run XP (multiplied) + quest XP + weekly bonus + milestone XP
-  let milestoneXP = 0;
-  for (const m of newMilestones) {
-    const def = MILESTONES.find((md) => md.id === m);
-    if (def) milestoneXP += def.xp_reward;
+  // 4. Check badge triggers
+  const badgeResult = checkBadges(activity, state);
+  for (const badge of badgeResult.badges_earned) {
+    if (!state.badges_earned.includes(badge.id)) {
+      state.badges_earned.push(badge.id);
+      allBadgesEarned.push(badge);
+    }
   }
+  Object.assign(state.badges_progress, badgeResult.progress_updates);
 
-  const grandTotalXP = multipliedRunXP + questUpdate.quest_xp + weeklyBonusXP + milestoneXP;
+  // 5. Detect surprise bonuses
+  const surpriseBonuses = detectSurpriseBonuses(activity, state.personal_records, lastRunDate);
+
+  // 6. Apply streak multiplier to run points
+  const streakMultiplier = getStreakMultiplier(state.streak_current_weeks);
+  const multipliedRunXP = Math.floor(xpResult.total_xp * streakMultiplier);
+
+  // 7. Sum all points
+  const badgePoints = badgeResult.total_points +
+    allBadgesEarned.filter((b) => !badgeResult.badges_earned.includes(b)).reduce((s, b) => s + b.points_reward, 0);
+  const surprisePoints = surpriseBonuses.reduce((s, b) => s + b.points, 0);
+  const grandTotalXP = multipliedRunXP + badgePoints + surprisePoints + weeklyBonusXP;
   state.xp_total += grandTotalXP;
 
   // Update weekly record XP
@@ -199,40 +241,30 @@ export async function processNewRun(
     currentWeekRecord.xp_earned += multipliedRunXP;
   }
 
-  // Lifetime stats
+  // 8. Update personal records
+  if (activity.longest_zone_streak_minutes > state.personal_records.longest_zone_streak_minutes) {
+    state.personal_records.longest_zone_streak_minutes = activity.longest_zone_streak_minutes;
+  }
+  if (
+    activity.cardiac_drift !== null &&
+    activity.cardiac_drift >= 0 &&
+    activity.qualifying &&
+    (state.personal_records.best_cardiac_drift === null || activity.cardiac_drift < state.personal_records.best_cardiac_drift)
+  ) {
+    state.personal_records.best_cardiac_drift = activity.cardiac_drift;
+  }
+  if (activity.warmup_score > state.personal_records.best_warmup_score) {
+    state.personal_records.best_warmup_score = activity.warmup_score;
+  }
+
+  // Lifetime stats (both v1 and v2 fields)
   state.total_zone_minutes += activity.zone_minutes;
+  state.lifetime_zone_minutes += activity.zone_minutes;
+  state.lifetime_total_runs += 1;
   if (activity.qualifying) {
     state.total_qualifying_runs += 1;
+    state.lifetime_qualifying_runs += 1;
   }
-
-  // Quest state
-  if (questUpdate.quest_completed) {
-    state.quests_completed.push(questUpdate.quest_completed);
-  }
-  if (questUpdate.new_active_quest !== null) {
-    state.quest_active = questUpdate.new_active_quest;
-  } else if (questUpdate.quest_completed) {
-    // Quest chain ended
-    state.quest_active = null;
-  }
-  Object.assign(state.quest_progress, questUpdate.progress_update);
-
-  // Badges from quest
-  if (questUpdate.badge_earned) {
-    state.badges.push(questUpdate.badge_earned);
-  }
-
-  // Milestones
-  for (const m of newMilestones) {
-    state.milestones.push(m);
-    const def = MILESTONES.find((md) => md.id === m);
-    if (def?.badge) {
-      state.badges.push(def.badge);
-    }
-  }
-
-  // Deduplicate badges
-  state.badges = [...new Set(state.badges)];
 
   // Save
   await saveGameState(kv, athleteId, state);
@@ -243,9 +275,8 @@ export async function processNewRun(
     xp_earned: grandTotalXP,
     xp_breakdown: xpResult,
     streak_multiplier: streakMultiplier,
-    milestones_unlocked: newMilestones,
-    quest_completed: questUpdate.quest_completed,
-    quest_xp: questUpdate.quest_xp,
+    badges_earned: allBadgesEarned,
+    surprise_bonuses: surpriseBonuses,
     weekly_bonus_xp: weeklyBonusXP,
     level_before: levelBefore,
     level_after: levelAfter,
@@ -253,91 +284,198 @@ export async function processNewRun(
   };
 }
 
-// ─── Milestone Checking ───────────────────────────────────────────────────────
-
-function checkMilestones(
-  activity: MAFActivity,
-  state: GameState
-): string[] {
-  const unlocked: string[] = [];
-
-  // We check against the state BEFORE this run's stats are added,
-  // but we need to include this run's contribution.
-  const projectedZoneMinutes = state.total_zone_minutes + activity.zone_minutes;
-  const projectedQualifyingRuns = state.total_qualifying_runs + (activity.qualifying ? 1 : 0);
-  const durationMinutes = activity.duration_seconds / 60;
-
-  for (const m of MILESTONES) {
-    // Skip already unlocked
-    if ((state.milestones || []).includes(m.id)) continue;
-
-    let earned = false;
-
-    switch (m.category) {
-      case 'zone_minutes':
-        earned = projectedZoneMinutes >= m.threshold;
-        break;
-
-      case 'run_count':
-        earned = projectedQualifyingRuns >= m.threshold;
-        break;
-
-      case 'streak':
-        earned = state.streak_current_weeks >= m.threshold;
-        break;
-
-      case 'decoupling':
-        // Threshold is the % to be UNDER (e.g., 5 means < 5%)
-        earned = activity.qualifying
-          && activity.aerobic_decoupling !== null
-          && Math.abs(activity.aerobic_decoupling) < m.threshold;
-        break;
-
-      case 'long_run':
-        earned = activity.qualifying && durationMinutes >= m.threshold;
-        break;
-    }
-
-    if (earned) {
-      unlocked.push(m.id);
-    }
-  }
-
-  return unlocked;
-}
-
-// ─── Settings Quest Trigger ───────────────────────────────────────────────────
+// ─── Settings Badge Trigger ──────────────────────────────────────────────────
 
 /**
- * Called when settings are saved. Completes the 'first_steps' quest if active.
+ * Called when settings are saved. Awards "Committed" badge if not already earned.
  */
 export async function onSettingsSaved(
   kv: KVNamespace,
-  athleteId: string
-): Promise<QuestUpdate> {
+  athleteId: string,
+): Promise<BadgeCheckResult> {
   const state = await loadGameState(kv, athleteId);
-  const questUpdate = completeFirstStepsQuest(state);
+  const badgeResult = checkSetupBadge(state);
 
-  if (questUpdate.quest_completed) {
-    state.quests_completed.push(questUpdate.quest_completed);
-    state.quest_active = questUpdate.new_active_quest;
-    Object.assign(state.quest_progress, questUpdate.progress_update);
-    state.xp_total += questUpdate.quest_xp;
-    if (questUpdate.badge_earned) {
-      state.badges.push(questUpdate.badge_earned);
+  if (badgeResult.badges_earned.length > 0) {
+    for (const badge of badgeResult.badges_earned) {
+      if (!state.badges_earned.includes(badge.id)) {
+        state.badges_earned.push(badge.id);
+      }
     }
+    state.xp_total += badgeResult.total_points;
+
+    // Also complete old first_steps quest for backward compat
+    if (state.quest_active === 'first_steps') {
+      state.quests_completed.push('first_steps');
+      state.quest_active = 'first_maf_run';
+      state.quest_progress = { first_steps: 1 };
+      state.badges.push('🏃');
+      state.xp_total += 50;
+    }
+
     await saveGameState(kv, athleteId, state);
   }
 
-  return questUpdate;
+  return badgeResult;
 }
 
-// ─── API Response Builder ─────────────────────────────────────────────────────
+// ─── Next Step Engine ────────────────────────────────────────────────────────
+
+/**
+ * Determine the single most important next action for the runner.
+ * Priority: streak protection > badge within reach > level progress > weekly target > encouragement
+ */
+export function buildNextStep(state: GameState): NextStep {
+  const now = new Date();
+  const currentWeek = getISOWeek(now);
+  const currentWeekRecord = state.weekly_history.find((w) => w.week === currentWeek);
+  const weeklyZoneMinutes = currentWeekRecord?.zone_minutes || 0;
+  const weeklyTarget = state.weekly_target_zone_minutes;
+  const minutesRemaining = Math.max(0, weeklyTarget - weeklyZoneMinutes);
+
+  const dayOfWeek = now.getDay();
+  const daysLeft = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+
+  // Priority 1: Streak protection
+  if (state.streak_current_weeks > 0 && minutesRemaining > 0) {
+    if (daysLeft <= 2) {
+      return {
+        priority: 'streak',
+        message: `${Math.ceil(minutesRemaining)} min to go — run ${daysLeft === 0 ? 'today' : 'tomorrow'} to keep the fire alive`,
+        detail: `${state.streak_current_weeks}-week streak at risk`,
+      };
+    }
+    return {
+      priority: 'streak',
+      message: `${Math.ceil(minutesRemaining)} minutes to go this week`,
+      detail: `One more run keeps your ${state.streak_current_weeks}-week streak alive`,
+    };
+  }
+
+  // Priority 2: Badge within reach
+  const nextBadge = getNextAchievableBadge(state);
+  if (nextBadge) {
+    return {
+      priority: 'badge',
+      message: nextBadge.message,
+      detail: nextBadge.detail,
+    };
+  }
+
+  // Priority 3: Level within 10%
+  const levelPct = getLevelProgressPct(state.xp_total);
+  if (levelPct >= 90) {
+    const nextLevelIdx = LEVEL_TABLE.findIndex((l) => l.xp_required > state.xp_total);
+    const nextLevelName = nextLevelIdx >= 0 ? LEVEL_TABLE[nextLevelIdx].name : null;
+    if (nextLevelName) {
+      return {
+        priority: 'level',
+        message: `Almost there — a few more runs to ${nextLevelName}`,
+        detail: `${Math.round(levelPct)}% of the way`,
+      };
+    }
+  }
+
+  // Priority 4: Weekly target progress
+  if (minutesRemaining > 0) {
+    const runsEstimate = Math.ceil(minutesRemaining / 30);
+    return {
+      priority: 'weekly',
+      message: `${Math.round(weeklyZoneMinutes)} / ${weeklyTarget} minutes this week`,
+      detail: runsEstimate === 1
+        ? 'One solid run wraps it up'
+        : `${runsEstimate} runs to hit your target`,
+    };
+  }
+
+  // Priority 5: General encouragement (target already met this week)
+  if (state.streak_current_weeks === 0 && weeklyZoneMinutes >= weeklyTarget) {
+    return {
+      priority: 'encouragement',
+      message: "Target hit! Keep going to start a streak",
+      detail: 'Hit your target again next week for a 1-week streak',
+    };
+  }
+
+  return {
+    priority: 'encouragement',
+    message: 'Great week. Keep the momentum going.',
+    detail: 'Your next run adds to a strong foundation',
+  };
+}
+
+/**
+ * Find the next badge the runner is closest to earning.
+ */
+function getNextAchievableBadge(state: GameState): { message: string; detail: string } | null {
+  const earned = new Set(state.badges_earned);
+
+  // First run badges: check run count
+  const runCount = state.lifetime_total_runs;
+  const firstRunBadges: { id: string; runsNeeded: number; name: string }[] = [
+    { id: 'first_spark', runsNeeded: 1, name: 'First Spark' },
+    { id: 'took_initiative', runsNeeded: 2, name: 'Took the Initiative' },
+    { id: 'three_for_three', runsNeeded: 3, name: 'Three for Three' },
+    { id: 'showing_up', runsNeeded: 4, name: 'Showing Up' },
+    { id: 'first_five', runsNeeded: 5, name: 'First Five' },
+  ];
+  for (const fb of firstRunBadges) {
+    if (!earned.has(fb.id) && runCount < fb.runsNeeded) {
+      const diff = fb.runsNeeded - runCount;
+      return {
+        message: diff === 1
+          ? `One more run earns ${fb.name}`
+          : `${diff} more runs to ${fb.name}`,
+        detail: BADGES.find((b) => b.id === fb.id)?.icon || '',
+      };
+    }
+  }
+
+  // Discipline badges
+  if (!earned.has('patience_practice')) {
+    const progress = state.badges_progress['patience_practice'] || 0;
+    if (progress > 0 && progress < 3) {
+      const remaining = 3 - progress;
+      return {
+        message: `${remaining} more run${remaining === 1 ? '' : 's'} with warmup score ≥ 80 earns Patience Practice`,
+        detail: '🧘',
+      };
+    }
+  }
+
+  // Volume badges
+  const volumeThresholds: { id: string; threshold: number; name: string }[] = [
+    { id: 'seedling', threshold: 100, name: 'Seedling' },
+    { id: 'taking_root', threshold: 500, name: 'Taking Root' },
+    { id: 'deep_roots', threshold: 1000, name: 'Deep Roots' },
+    { id: 'summit_seeker', threshold: 2500, name: 'Summit Seeker' },
+    { id: 'bonfire', threshold: 5000, name: 'Bonfire' },
+    { id: 'eternal_flame', threshold: 10000, name: 'Eternal Flame' },
+  ];
+  for (const vb of volumeThresholds) {
+    if (!earned.has(vb.id)) {
+      const remaining = vb.threshold - state.lifetime_zone_minutes;
+      if (remaining > 0 && remaining <= vb.threshold * 0.15) {
+        return {
+          message: `${Math.ceil(remaining)} more zone minutes to ${vb.name}`,
+          detail: BADGES.find((b) => b.id === vb.id)?.icon || '',
+        };
+      }
+      break; // Only show the next unearned volume badge
+    }
+  }
+
+  return null;
+}
+
+// ─── API Response Builder ────────────────────────────────────────────────────
 
 export function buildGameAPIResponse(state: GameState): GameAPIResponse {
   const level = getLevelFromXP(state.xp_total);
   const xpToNext = getXPToNextLevel(state.xp_total);
-  const streakMultiplier = getStreakMultiplier(state.streak_current_weeks);
+  const levelPct = getLevelProgressPct(state.xp_total);
+  const nextLevelIdx = LEVEL_TABLE.findIndex((l) => l.xp_required > state.xp_total);
+  const nextLevelName = nextLevelIdx >= 0 ? LEVEL_TABLE[nextLevelIdx].name : null;
 
   // Current week info
   const now = new Date();
@@ -345,35 +483,25 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
   const currentWeekRecord = state.weekly_history.find((w) => w.week === currentWeek);
 
   // Days left in week (week starts Monday)
-  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ...
+  const dayOfWeek = now.getDay();
   const daysLeft = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
 
-  // Active quest info
-  let questActive: GameAPIResponse['quest_active'] = null;
-  if (state.quest_active) {
-    const def = getQuestDef(state.quest_active);
-    if (def) {
-      questActive = {
-        id: def.id,
-        name: def.name,
-        progress: state.quest_progress[state.quest_active] || 0,
-        target: def.target,
-      };
-    }
-  }
+  // Recent badges (last 3)
+  const badgesRecent = (state.badges_earned || []).slice(-3);
 
-  // Recent milestones (last 5)
-  const recentMilestones = (state.milestones || []).slice(-5);
+  // Next step
+  const nextStep = buildNextStep(state);
 
   return {
-    xp_total: state.xp_total,
+    // v2 fields
     level: level.level,
     level_name: level.name,
-    xp_to_next_level: xpToNext,
+    level_progress_pct: Math.round(levelPct),
+    next_level_name: nextLevelName,
     streak: {
       current: state.streak_current_weeks || 0,
       longest: state.streak_longest || 0,
-      multiplier: streakMultiplier,
+      frozen: state.streak?.frozen || false,
     },
     weekly: {
       zone_minutes: currentWeekRecord?.zone_minutes || 0,
@@ -382,10 +510,18 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
       qualifying_runs: currentWeekRecord?.qualifying_runs || 0,
       days_left: daysLeft,
     },
-    quest_active: questActive,
-    recent_milestones: recentMilestones,
-    badges: state.badges,
-    total_zone_minutes: state.total_zone_minutes,
-    total_qualifying_runs: state.total_qualifying_runs,
+    badges_earned: state.badges_earned || [],
+    badges_recent: badgesRecent,
+    next_step: nextStep,
+    total_zone_minutes: state.total_zone_minutes || state.lifetime_zone_minutes || 0,
+    total_qualifying_runs: state.total_qualifying_runs || state.lifetime_qualifying_runs || 0,
+    lifetime_total_runs: state.lifetime_total_runs || 0,
+
+    // v1 compat
+    xp_total: state.xp_total,
+    xp_to_next_level: xpToNext,
+    quest_active: null,
+    recent_milestones: [],
+    badges: state.badges || [],
   };
 }

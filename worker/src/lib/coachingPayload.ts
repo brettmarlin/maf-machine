@@ -8,7 +8,7 @@
 import type { MAFActivity, UserSettings } from './mafAnalysis';
 import { formatPace as formatPaceFromMinPerUnit } from './mafAnalysis';
 import type { GameState, WeeklyRecord } from './gameTypes';
-import { getLevelFromXP, getXPToNextLevel, getStreakMultiplier } from './gameTypes';
+import { getLevelFromXP, getLevelProgressPct, getStreakMultiplier } from './gameTypes';
 
 // --- Payload Interfaces ---
 
@@ -47,8 +47,9 @@ export interface ThisRunContext {
   elevation_unit: string;
   xp_earned: number;
   xp_breakdown: Record<string, number>;
-  milestones_unlocked: string[];
-  quest_completed: string | null;
+  badges_earned: string[];
+  surprise_bonuses: string[];
+  next_step: string | null;
 }
 
 export interface RecentRunSummary {
@@ -84,10 +85,10 @@ export interface TrendsContext {
   avg_cardiac_drift_4wk: number | null;
   total_zone_minutes_lifetime: number;
   total_qualifying_runs: number;
-  total_xp: number;
   level: number;
   level_name: string;
-  xp_to_next_level: number;
+  level_progress_pct: number;
+  badges_earned: string[];
 }
 
 export interface CoachingPayload {
@@ -205,10 +206,10 @@ function buildTrends(recentActivities: MAFActivity[], gameState: GameState, unit
       recentActivities.reduce((sum, a) => sum + a.zone_minutes, 0)
     ),
     total_qualifying_runs: qualifying.length,
-    total_xp: gameState.xp_total,
     level: level.level,
     level_name: level.name,
-    xp_to_next_level: getXPToNextLevel(gameState.xp_total),
+    level_progress_pct: Math.round(getLevelProgressPct(gameState.xp_total)),
+    badges_earned: gameState.badges_earned || [],
   };
 }
 
@@ -232,8 +233,9 @@ export function buildPostRunPayload(
   settings: UserSettings,
   xpEarned: number,
   xpBreakdown: Record<string, number>,
-  milestonesUnlocked: string[],
-  questCompleted: string | null
+  badgesEarned: string[],
+  surpriseBonuses: string[],
+  nextStep: string | null,
 ): CoachingPayload {
   const units = settings.units || 'mi';
   const currentWeek = getCurrentISOWeek();
@@ -272,8 +274,9 @@ export function buildPostRunPayload(
     elevation_unit: units === 'mi' ? 'ft' : 'm',
     xp_earned: xpEarned,
     xp_breakdown: xpBreakdown,
-    milestones_unlocked: milestonesUnlocked,
-    quest_completed: questCompleted,
+    badges_earned: badgesEarned,
+    surprise_bonuses: surpriseBonuses,
+    next_step: nextStep,
   };
 
   // Recent history (last 5, excluding current)

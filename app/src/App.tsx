@@ -13,6 +13,7 @@ interface Settings {
   maf_zone_high?: number
   qualifying_tolerance?: number
   start_date?: string | null
+  athlete_name?: string
 }
 
 const DEFAULT_SETTINGS: Settings = {

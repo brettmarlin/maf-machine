@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, ReactNode } from 'react'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -16,22 +16,59 @@ import { formatPace, computeMAFTiers } from '../lib/mafAnalysis'
 
 type Overlay = 'pace' | 'ef' | 'cadence'
 
-const OVERLAY_CONFIG: { key: Overlay; label: string; color: string; activeColor: string }[] = [
-  { key: 'pace', label: 'Pace', color: 'bg-gray-800 text-gray-400', activeColor: 'bg-orange-600 text-white' },
-  { key: 'ef', label: 'Efficiency', color: 'bg-gray-800 text-gray-400', activeColor: 'bg-blue-600 text-white' },
-  { key: 'cadence', label: 'Cadence', color: 'bg-gray-800 text-gray-400', activeColor: 'bg-green-600 text-white' },
+const OVERLAY_CONFIG: { key: Overlay; label: string }[] = [
+  { key: 'pace', label: 'Pace' },
+  { key: 'ef', label: 'Eff' },
+  { key: 'cadence', label: 'Cad' },
 ]
 
 interface Props {
   trends: MAFTrend[]
   units: 'km' | 'mi'
   mafHr: number
+  datePickerSlot?: ReactNode  // DateRangePicker rendered in toggle bar
 }
 
-export function TrendChart({ trends, units, mafHr }: Props) {
-  // Default: HR always on + Pace overlay on
+// Custom heart shape for HR dots
+function HeartDot(props: any) {
+  const { cx, cy } = props
+  if (!cx || !cy) return null
+  const s = 4.5
+  return (
+    <path
+      d={`M${cx},${cy + s * 0.4} C${cx},${cy + s * 0.4} ${cx - s},${cy - s * 0.2} ${cx - s},${cy - s * 0.55} C${cx - s},${cy - s} ${cx},${cy - s} ${cx},${cy - s * 0.55} C${cx},${cy - s} ${cx + s},${cy - s} ${cx + s},${cy - s * 0.55} C${cx + s},${cy - s * 0.2} ${cx},${cy + s * 0.4} ${cx},${cy + s * 0.4}`}
+      fill="#9ca3af"
+      fillOpacity={0.6}
+      stroke="none"
+    />
+  )
+}
+
+// Custom diamond shape for pace dots
+function DiamondDot(props: any) {
+  const { cx, cy } = props
+  if (!cx || !cy) return null
+  const size = 4
+  return (
+    <polygon
+      points={`${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`}
+      fill="#f97316"
+      fillOpacity={0.7}
+      stroke="none"
+    />
+  )
+}
+
+export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(['pace']))
   const [showRolling, setShowRolling] = useState(true)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 500)
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 500)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const tiers = computeMAFTiers(mafHr)
 
@@ -45,6 +82,7 @@ export function TrendChart({ trends, units, mafHr }: Props) {
   const chartData = trends.map((t) => ({
     date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     rawDate: t.date,
+    name: (t as any).name || '',
     avgHr: t.avgHr,
     rollingHr: t.rollingHr,
     mafPace: t.mafPace,
@@ -57,45 +95,72 @@ export function TrendChart({ trends, units, mafHr }: Props) {
     timeInZonePct: t.timeInZonePct,
   }))
 
-  // HR Y-axis domain — show from below easy tier to above ceiling
   const allHr = chartData.map((d) => d.avgHr).filter(Boolean)
   const minHr = Math.min(...allHr, tiers.easy_low - 5)
   const maxHr = Math.max(...allHr, tiers.ceiling + 10)
   const hrDomain: [number, number] = [Math.floor(minHr / 5) * 5, Math.ceil(maxHr / 5) * 5]
 
-  const hasOverlay = overlays.size > 0
+  // Compute EF domain for dedicated axis
+  const allEf = chartData.map((d) => d.ef).filter((v) => v > 0)
+  const efMin = allEf.length > 0 ? Math.floor((Math.min(...allEf) - 0.02) * 100) / 100 : 0.5
+  const efMax = allEf.length > 0 ? Math.ceil((Math.max(...allEf) + 0.02) * 100) / 100 : 1.5
+  const efDomain: [number, number] = [efMin, efMax]
+
+  const hasPace = overlays.has('pace')
+  const hasEf = overlays.has('ef')
+  const hasCadence = overlays.has('cadence')
+
+  const rightMargin = isMobile ? 2 : 5
+  const leftMargin = isMobile ? -20 : -10
+  const leftAxisWidth = isMobile ? 28 : 35
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
     const data = payload[0]?.payload
     const aboveCeiling = data.avgHr > mafHr
+    const belowPct = data.timeInZonePct?.toFixed(0)
+
     return (
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm shadow-lg">
-        <p className="text-gray-400 mb-2 font-medium">{label}</p>
-        <p className={aboveCeiling ? 'text-red-400' : 'text-green-400'}>
-          HR: <span className="font-semibold">{Math.round(data.avgHr)} bpm</span>
-          {data.rollingHr && <span className="text-gray-500 ml-1">(avg: {Math.round(data.rollingHr)})</span>}
-          {aboveCeiling && <span className="text-red-500 ml-1">above ceiling</span>}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm shadow-lg max-w-[220px]">
+        {/* Run name + date */}
+        {data.name && (
+          <p className="text-white font-medium text-xs truncate mb-0.5">{data.name}</p>
+        )}
+        <p className="text-gray-500 text-xs mb-2">{label}</p>
+
+        {/* HR */}
+        <p className={aboveCeiling ? 'text-gray-400' : 'text-white'}>
+          <span className="text-gray-500">HR:</span>{' '}
+          <span className="font-semibold">{Math.round(data.avgHr)} bpm</span>
+          {aboveCeiling && <span className="text-gray-500 text-xs ml-1">over</span>}
         </p>
-        <p className="text-gray-500 text-xs">
-          Below ceiling: {data.timeInZonePct?.toFixed(0)}%
-          {data.qualifying ? ' ✓' : ''}
-        </p>
+
+        {/* Pace */}
         {overlays.has('pace') && data.mafPace > 0 && (
-          <p className="text-orange-400 mt-1">
-            Pace: <span className="font-semibold">{formatPace(data.mafPace, units)}</span>
-            {data.rollingMafPace && <span className="text-gray-500 ml-1">(avg: {formatPace(data.rollingMafPace, units)})</span>}
+          <p className="text-orange-400 mt-0.5">
+            <span className="text-gray-500">Pace:</span>{' '}
+            <span className="font-semibold">{formatPace(data.mafPace, units)}</span>
           </p>
         )}
+
+        {/* Below ceiling */}
+        {belowPct && (
+          <p className="text-gray-500 text-xs mt-1">
+            {belowPct}% in zone{data.qualifying ? ' ✓' : ''}
+          </p>
+        )}
+
+        {/* EF if toggled */}
         {overlays.has('ef') && data.ef > 0 && (
-          <p className="text-blue-400 mt-1">
-            EF: <span className="font-semibold">{data.ef.toFixed(2)}</span>
-            {data.rollingEf && <span className="text-gray-500 ml-1">(avg: {data.rollingEf.toFixed(2)})</span>}
+          <p className="text-gray-400 text-xs mt-0.5">
+            EF: {data.ef.toFixed(2)}
           </p>
         )}
+
+        {/* Cadence if toggled */}
         {overlays.has('cadence') && data.cadence && (
-          <p className="text-green-400 mt-1">
-            Cadence: <span className="font-semibold">{Math.round(data.cadence)} spm</span>
+          <p className="text-gray-400 text-xs mt-0.5">
+            Cadence: {Math.round(data.cadence)} spm
           </p>
         )}
       </div>
@@ -103,113 +168,154 @@ export function TrendChart({ trends, units, mafHr }: Props) {
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
-      {/* Overlay Controls */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white">
-          ♥ Heart Rate
-        </span>
-        <span className="text-xs text-gray-600">|</span>
-        {OVERLAY_CONFIG.map((o) => (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none" tabIndex={-1} style={{ outline: 'none' }}>
+      {/* Unified toggle-legend row */}
+      <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Ceiling — always shown, not toggleable */}
+          <span className="flex items-center gap-1 text-xs px-2 py-1.5 text-green-500/70">
+            <span className="w-3 h-0 border-t-2 border-dashed border-green-500/60" />
+            <span className="hidden sm:inline">Ceiling</span>
+          </span>
+
+          {/* HR — always on, not toggleable */}
+          <span className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg bg-white/10 text-white border border-white/20">
+            <svg width="10" height="9" viewBox="0 0 10 9" className="shrink-0">
+              <path d="M5,8 C5,8 0,4.5 0,2.5 C0,0.5 2,0 3,0.5 C3.6,0.8 4.3,1.5 5,2.5 C5.7,1.5 6.4,0.8 7,0.5 C8,0 10,0.5 10,2.5 C10,4.5 5,8 5,8Z" fill="#9ca3af" />
+            </svg>
+            HR
+          </span>
+
+          {/* Toggleable overlays */}
+          {OVERLAY_CONFIG.map((o) => {
+            const active = overlays.has(o.key)
+            return (
+              <button
+                key={o.key}
+                onClick={() => toggleOverlay(o.key)}
+                className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg transition-colors border ${
+                  active
+                    ? 'bg-white/10 text-white border-white/20'
+                    : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
+                }`}
+              >
+                {o.key === 'pace' && <span className={`w-2 h-2 rotate-45 ${active ? 'bg-orange-500' : 'bg-gray-700'}`} />}
+                {o.key === 'ef' && <span className={`w-2 h-2 rounded-full ${active ? 'bg-gray-400' : 'bg-gray-700'}`} />}
+                {o.key === 'cadence' && <span className={`w-3 h-0 border-t ${active ? 'border-gray-400 border-dashed' : 'border-gray-700 border-dashed'}`} />}
+                {o.label}
+              </button>
+            )
+          })}
+
+          {/* Rolling avg toggle */}
           <button
-            key={o.key}
-            onClick={() => toggleOverlay(o.key)}
-            className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-              overlays.has(o.key) ? o.activeColor : o.color
+            onClick={() => setShowRolling(!showRolling)}
+            className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg transition-colors border ${
+              showRolling
+                ? 'bg-white/10 text-white border-white/20'
+                : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
             }`}
           >
-            {o.label}
+            Avg
           </button>
-        ))}
-        <span className="text-xs text-gray-600">|</span>
-        <button
-          onClick={() => setShowRolling(!showRolling)}
-          className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-            showRolling ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500'
-          }`}
-        >
-          4wk Avg
-        </button>
+        </div>
+
+        {/* Spacer + date picker at right end */}
+        {datePickerSlot && (
+          <>
+            <div className="flex-1 min-w-[8px]" />
+            <div className="shrink-0">{datePickerSlot}</div>
+          </>
+        )}
       </div>
 
       {/* Chart */}
       {chartData.length > 0 ? (
         <ResponsiveContainer width="100%" height={380}>
-          <ComposedChart data={chartData} margin={{ top: 10, right: hasOverlay ? 60 : 10, bottom: 0, left: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 10, right: rightMargin, bottom: 0, left: leftMargin }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
             <XAxis
               dataKey="date"
               tick={{ fill: '#6b7280', fontSize: 11 }}
               tickLine={{ stroke: '#374151' }}
+              padding={{ right: 20 }}
             />
 
             {/* Primary Y-axis: Heart Rate */}
             <YAxis
               yAxisId="hr"
               domain={hrDomain}
-              tick={{ fill: '#6b7280', fontSize: 11 }}
+              tick={{ fill: '#6b7280', fontSize: isMobile ? 10 : 11 }}
               tickLine={{ stroke: '#374151' }}
-              label={{ value: 'bpm', angle: -90, position: 'insideLeft', fill: '#6b7280', fontSize: 11 }}
+              width={leftAxisWidth}
             />
 
-            {/* Secondary Y-axis for overlays */}
-            {overlays.has('pace') && (
+            {/* Secondary Y-axis: Pace (right side) — hidden on mobile */}
+            {hasPace && (
               <YAxis
                 yAxisId="pace"
                 orientation="right"
                 reversed
-                tick={{ fill: '#6b7280', fontSize: 11 }}
+                tick={isMobile ? false : { fill: '#6b7280', fontSize: 10 }}
+                tickLine={!isMobile}
+                axisLine={!isMobile}
                 tickFormatter={(v) => formatPace(v, units)}
                 domain={['auto', 'auto']}
-                label={{ value: `min/${units}`, angle: 90, position: 'insideRight', fill: '#6b7280', fontSize: 11 }}
+                width={isMobile ? 2 : 50}
               />
             )}
 
-            {overlays.has('ef') && !overlays.has('pace') && (
+            {/* Tertiary Y-axis: EF (right side) — hidden on mobile */}
+            {hasEf && (
               <YAxis
                 yAxisId="ef"
                 orientation="right"
-                tick={{ fill: '#6b7280', fontSize: 11 }}
-                domain={['auto', 'auto']}
-                label={{ value: 'EF', angle: 90, position: 'insideRight', fill: '#6b7280', fontSize: 11 }}
+                domain={efDomain}
+                tick={isMobile ? false : { fill: '#6b7280', fontSize: 10 }}
+                tickLine={!isMobile}
+                axisLine={!isMobile}
+                tickFormatter={(v) => v.toFixed(2)}
+                width={isMobile ? 2 : 40}
               />
             )}
 
-            {overlays.has('cadence') && !overlays.has('pace') && !overlays.has('ef') && (
+            {/* Cadence axis (only if no pace or ef to share with) — hidden on mobile */}
+            {hasCadence && !hasPace && !hasEf && (
               <YAxis
                 yAxisId="cadence"
                 orientation="right"
-                tick={{ fill: '#6b7280', fontSize: 11 }}
+                tick={isMobile ? false : { fill: '#6b7280', fontSize: 11 }}
+                tickLine={!isMobile}
+                axisLine={!isMobile}
                 domain={['auto', 'auto']}
-                label={{ value: 'spm', angle: 90, position: 'insideRight', fill: '#6b7280', fontSize: 11 }}
+                label={isMobile ? undefined : { value: 'spm', angle: 90, position: 'insideRight', fill: '#4b5563', fontSize: 11 }}
+                width={isMobile ? 2 : undefined}
               />
             )}
 
             <Tooltip content={<CustomTooltip />} />
 
-            {/* ─── Ceiling Model Visualization ─── */}
-
-            {/* Tier shading: Controlled (light green) */}
+            {/* Tier shading: Controlled (ceiling down to controlled_low) — green */}
             <ReferenceArea
               yAxisId="hr"
               y1={tiers.controlled_low}
-              y2={tiers.controlled_high}
+              y2={tiers.ceiling}
               fill="#22c55e"
-              fillOpacity={0.08}
+              fillOpacity={0.12}
               stroke="none"
             />
 
-            {/* Tier shading: Easy (light blue) */}
+            {/* Tier shading: Easy — lighter green */}
             <ReferenceArea
               yAxisId="hr"
               y1={tiers.easy_low}
-              y2={tiers.easy_high}
-              fill="#3b82f6"
-              fillOpacity={0.05}
+              y2={tiers.controlled_low}
+              fill="#22c55e"
+              fillOpacity={0.06}
               stroke="none"
             />
 
-            {/* Over ceiling zone: red tint */}
+            {/* Over ceiling: subtle red tint */}
             <ReferenceArea
               yAxisId="hr"
               y1={tiers.ceiling}
@@ -219,63 +325,117 @@ export function TrendChart({ trends, units, mafHr }: Props) {
               stroke="none"
             />
 
-            {/* MAF Ceiling Line — the hard cap */}
+            {/* MAF Ceiling Line — green = safe boundary */}
             <ReferenceLine
               yAxisId="hr"
               y={tiers.ceiling}
-              stroke="#ef4444"
+              stroke="#22c55e"
               strokeWidth={2}
               strokeDasharray="6 3"
-              label={{ value: `Ceiling ${tiers.ceiling}`, fill: '#ef4444', fontSize: 10, position: 'left' }}
+              label={{ value: `Ceiling ${tiers.ceiling}`, fill: '#22c55e', fontSize: 10, position: 'left' }}
             />
 
-            {/* Tier boundaries — subtle */}
+            {/* Tier boundary: controlled_low — very subtle */}
             <ReferenceLine
               yAxisId="hr"
               y={tiers.controlled_low}
               stroke="#22c55e"
               strokeDasharray="2 4"
               strokeWidth={0.5}
-              strokeOpacity={0.4}
+              strokeOpacity={0.2}
             />
             <ReferenceLine
               yAxisId="hr"
               y={tiers.easy_low}
-              stroke="#3b82f6"
+              stroke="#22c55e"
               strokeDasharray="2 4"
               strokeWidth={0.5}
-              strokeOpacity={0.3}
+              strokeOpacity={0.12}
             />
 
-            {/* Heart Rate */}
-            <Scatter yAxisId="hr" dataKey="avgHr" fill="#ef4444" r={4} fillOpacity={0.7} name="Avg HR" />
+            {/* Heart Rate dots — heart shapes */}
+            <Scatter
+              yAxisId="hr"
+              dataKey="avgHr"
+              shape={<HeartDot />}
+              name="Avg HR"
+            />
             {showRolling && (
-              <Line yAxisId="hr" dataKey="rollingHr" stroke="#ef4444" strokeWidth={2.5} dot={false} connectNulls name="HR (4wk avg)" />
+              <Line
+                yAxisId="hr"
+                dataKey="rollingHr"
+                stroke="#9ca3af"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+                name="HR avg"
+              />
             )}
 
-            {/* Pace overlay */}
-            {overlays.has('pace') && (
+            {/* Pace overlay — diamond shapes for data, dashed line for average */}
+            {hasPace && (
               <>
-                <Scatter yAxisId="pace" dataKey="mafPace" fill="#f97316" r={3} fillOpacity={0.5} name="MAF Pace" />
+                <Scatter
+                  yAxisId="pace"
+                  dataKey="mafPace"
+                  shape={<DiamondDot />}
+                  name="MAF Pace"
+                />
                 {showRolling && (
-                  <Line yAxisId="pace" dataKey="rollingMafPace" stroke="#f97316" strokeWidth={2} dot={false} connectNulls name="Pace (4wk avg)" strokeDasharray="4 2" />
+                  <Line
+                    yAxisId="pace"
+                    dataKey="rollingMafPace"
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    name="Pace avg"
+                    strokeDasharray="4 2"
+                  />
                 )}
               </>
             )}
 
-            {/* EF overlay */}
-            {overlays.has('ef') && (
+            {/* EF overlay — own axis, line only */}
+            {hasEf && (
               <>
-                <Scatter yAxisId={overlays.has('pace') ? 'pace' : 'ef'} dataKey="ef" fill="#3b82f6" r={3} fillOpacity={0.5} name="EF" />
+                {/* EF scatter dots — small, subtle */}
+                <Scatter
+                  yAxisId="ef"
+                  dataKey="ef"
+                  fill="#6b7280"
+                  stroke="#6b7280"
+                  r={2.5}
+                  fillOpacity={0.4}
+                  name="EF"
+                />
                 {showRolling && (
-                  <Line yAxisId={overlays.has('pace') ? 'pace' : 'ef'} dataKey="rollingEf" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls name="EF (4wk avg)" strokeDasharray="4 2" />
+                  <Line
+                    yAxisId="ef"
+                    dataKey="rollingEf"
+                    stroke="#6b7280"
+                    strokeWidth={1.5}
+                    dot={false}
+                    connectNulls
+                    name="EF avg"
+                    strokeDasharray="2 2"
+                  />
                 )}
               </>
             )}
 
-            {/* Cadence overlay */}
-            {overlays.has('cadence') && (
-              <Scatter yAxisId={overlays.has('pace') ? 'pace' : overlays.has('ef') ? 'ef' : 'cadence'} dataKey="cadence" fill="#22c55e" r={3} fillOpacity={0.5} name="Cadence" />
+            {/* Cadence overlay — line only */}
+            {hasCadence && showRolling && (
+              <Line
+                yAxisId={hasPace ? 'pace' : hasEf ? 'ef' : 'cadence'}
+                dataKey="rollingCadence"
+                stroke="#4b5563"
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls
+                name="Cadence avg"
+                strokeDasharray="2 2"
+              />
             )}
           </ComposedChart>
         </ResponsiveContainer>
@@ -285,39 +445,6 @@ export function TrendChart({ trends, units, mafHr }: Props) {
         </div>
       )}
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 px-2">
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-red-500 rounded"></span>
-          Ceiling ({tiers.ceiling} bpm)
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-green-500 opacity-30"></span>
-          Controlled ({tiers.controlled_low}–{tiers.controlled_high})
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-blue-500 opacity-30"></span>
-          Easy ({tiers.easy_low}–{tiers.easy_high})
-        </span>
-        {overlays.has('pace') && (
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-orange-500 rounded"></span>
-            Pace (right axis, inverted)
-          </span>
-        )}
-        {overlays.has('ef') && (
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-blue-500 rounded"></span>
-            Efficiency Factor
-          </span>
-        )}
-        {overlays.has('cadence') && (
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-500"></span>
-            Cadence (spm)
-          </span>
-        )}
-      </div>
     </div>
   )
 }

@@ -48,6 +48,9 @@ export interface StravaActivity {
   type: string;
   sport_type: string;
   start_date: string;
+  start_date_local?: string;
+  timezone?: string;
+  start_latlng?: [number, number];
   elapsed_time: number;
   distance: number;
   average_heartrate?: number;
@@ -112,6 +115,10 @@ export interface MAFActivity {
 
 const METERS_PER_MILE = 1609.344;
 const METERS_PER_KM = 1000;
+
+// Minimum velocity threshold (m/s): filters out GPS drift, standing still, tying shoes.
+// 0.5 m/s ≈ 53 min/mi — anything slower is not meaningful movement.
+const MIN_VELOCITY = 0.5;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -297,7 +304,7 @@ function computePaceSteadiness(
   const belowCeilingVelocities: number[] = [];
 
   for (let i = 0; i < len; i++) {
-    if (hr[i] <= ceiling && velocity[i] > 0) {
+    if (hr[i] <= ceiling && velocity[i] > MIN_VELOCITY) {
       belowCeilingVelocities.push(velocity[i]);
     }
   }
@@ -355,16 +362,20 @@ export function analyzeActivity(
     tierBreakdown = computeTierBreakdown(hr.slice(0, len), tiers);
 
     // ── Pace + cadence while below ceiling ──────────────────────────────
-    let belowCeilingPaceSum = 0;
-    let belowCeilingPaceCount = 0;
+    // FIX: Average velocities (m/s), then convert to pace once.
+    // Old code averaged pace values, which is mathematically wrong because
+    // pace is inversely proportional to speed. A single near-stop second
+    // (e.g., 0.1 m/s = 268 min/mi) would massively skew the average.
+    let belowCeilingVelocitySum = 0;
+    let belowCeilingVelocityCount = 0;
     let belowCeilingCadenceSum = 0;
     let belowCeilingCadenceCount = 0;
 
     for (let i = 0; i < len; i++) {
       if (hr[i] <= tiers.ceiling) {
-        if (velocity[i] > 0) {
-          belowCeilingPaceSum += velocityToPace(velocity[i], units);
-          belowCeilingPaceCount++;
+        if (velocity[i] > MIN_VELOCITY) {
+          belowCeilingVelocitySum += velocity[i];
+          belowCeilingVelocityCount++;
         }
         if (cadence && cadence[i] > 0) {
           belowCeilingCadenceSum += cadence[i] * 2;
@@ -373,7 +384,10 @@ export function analyzeActivity(
       }
     }
 
-    mafPace = belowCeilingPaceCount > 0 ? belowCeilingPaceSum / belowCeilingPaceCount : avgPace;
+    // Convert average velocity to pace (correct way)
+    mafPace = belowCeilingVelocityCount > 0
+      ? velocityToPace(belowCeilingVelocitySum / belowCeilingVelocityCount, units)
+      : avgPace;
     cadenceInZone = belowCeilingCadenceCount > 0 ? belowCeilingCadenceSum / belowCeilingCadenceCount : null;
 
     // ── Cardiac drift ───────────────────────────────────────────────────
@@ -483,4 +497,8 @@ export function formatPace(pace: number, units: 'km' | 'mi'): string {
   const minutes = Math.floor(pace);
   const seconds = Math.round((pace - minutes) * 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')} /${units}`;
+}
+
+export function formatEF(ef: number): string {
+  return ef.toFixed(2);
 }

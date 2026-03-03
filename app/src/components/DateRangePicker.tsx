@@ -33,8 +33,8 @@ function endOfDay(d: Date): Date {
   return r
 }
 
-function formatShort(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+function formatCompact(d: Date): string {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 function formatInputDate(d: Date): string {
@@ -55,7 +55,7 @@ export function getDefaultRange(trainingStartDate?: string | null): DateRange {
     return {
       start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
       end: endOfDay(new Date()),
-      label: 'Since start date',
+      label: 'Since start',
     }
   }
   return {
@@ -147,14 +147,12 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
   const [selectingStart, setSelectingStart] = useState(true)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Calendar view: show 2 months
   const [viewDate, setViewDate] = useState(() => {
     const d = new Date()
     d.setMonth(d.getMonth() - 1)
     return d
   })
 
-  // Close on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -187,13 +185,11 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
     if (selectingStart) {
       setCustomStart(d)
       setSelectingStart(false)
-      // If clicked start is after current end, reset end
       if (d > customEnd) {
         setCustomEnd(endOfDay(new Date()))
       }
     } else {
       if (d < customStart) {
-        // Clicked before start — treat as new start
         setCustomStart(d)
         setSelectingStart(false)
       } else {
@@ -207,7 +203,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
     onChange({
       start: startOfDay(customStart),
       end: endOfDay(customEnd),
-      label: `${formatShort(customStart)} – ${formatShort(customEnd)}`,
+      label: `${formatCompact(customStart)} – ${formatCompact(customEnd)}`,
     })
     setOpen(false)
   }
@@ -231,28 +227,27 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
 
   return (
     <div className="relative" ref={ref}>
-      {/* Trigger */}
+      {/* Trigger — compact, mobile-safe */}
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-xs bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-3 py-1.5 rounded-lg transition-colors"
+        className="flex items-center gap-1.5 text-xs bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-2.5 py-1.5 rounded-lg transition-colors"
       >
-        <span className="text-gray-400">{value.label}</span>
-        <span className="text-gray-300 font-medium">
-          {formatShort(value.start)} – {formatShort(value.end)}
+        <span className="text-gray-300">
+          {value.label}
         </span>
-        <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-3 h-3 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 flex overflow-hidden">
+        <div className="absolute right-0 top-full mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 flex overflow-hidden max-w-[calc(100vw-2rem)]">
           {/* Presets column */}
-          <div className="w-44 border-r border-gray-800 py-2">
+          <div className="w-40 border-r border-gray-800 py-2 shrink-0">
             <button
               onClick={() => setMode('custom')}
-              className={`w-full text-left px-4 py-2 text-xs transition-colors ${
+              className={`w-full text-left px-3 py-2 text-xs transition-colors ${
                 mode === 'custom' ? 'text-orange-400 bg-gray-800/50' : 'text-gray-400 hover:bg-gray-800/50'
               }`}
             >
@@ -265,12 +260,12 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
                   onChange({
                     start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
                     end: endOfDay(new Date()),
-                    label: 'Since start date',
+                    label: 'Since start',
                   })
                   setOpen(false)
                 }}
-                className={`w-full text-left px-4 py-2 text-xs transition-colors ${
-                  value.label === 'Since start date'
+                className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                  value.label === 'Since start'
                     ? 'text-orange-400 bg-gray-800/50'
                     : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                 }`}
@@ -282,7 +277,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
               <button
                 key={p.label}
                 onClick={() => selectPreset(p)}
-                className={`w-full text-left px-4 py-2 text-xs transition-colors ${
+                className={`w-full text-left px-3 py-2 text-xs transition-colors ${
                   value.label === p.label
                     ? 'text-orange-400 bg-gray-800/50'
                     : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
@@ -295,12 +290,12 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
 
           {/* Calendar column */}
           {mode === 'custom' && (
-            <div className="p-4 space-y-4 w-[300px]">
+            <div className="p-3 space-y-3 w-[280px]">
               {/* Date inputs */}
               <div className="flex items-center gap-2">
                 <div className="flex-1">
                   <label className={`text-[10px] uppercase tracking-wide ${selectingStart ? 'text-orange-400' : 'text-gray-500'}`}>
-                    Start date
+                    Start
                   </label>
                   <input
                     type="date"
@@ -315,7 +310,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
                 <span className="text-gray-600 text-xs mt-3">–</span>
                 <div className="flex-1">
                   <label className={`text-[10px] uppercase tracking-wide ${!selectingStart ? 'text-orange-400' : 'text-gray-500'}`}>
-                    End date
+                    End
                   </label>
                   <input
                     type="date"

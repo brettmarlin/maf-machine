@@ -1,7 +1,8 @@
 import { analyzeActivity } from './lib/mafAnalysis';
 import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './lib/mafAnalysis';
-// import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
-// import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
+import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
+import { fetchActivityWeather } from './lib/weatherService';
+import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
 import {
   generatePostRunCoaching, generateWeeklySummary, handleChatMessage,
   getCachedCoaching, cacheCoaching, getCachedWeeklySummary, cacheWeeklySummary,
@@ -18,8 +19,10 @@ export interface Env {
   STRAVA_CLIENT_ID: string;
   STRAVA_CLIENT_SECRET: string;
   ANTHROPIC_API_KEY?: string;
+  OPENWEATHERMAP_API_KEY?: string;
   DEV_MODE?: string;
   DEV_ATHLETE_ID?: string;
+  COACHING_ENABLED?: string;
 }
 
 interface StravaTokenResponse {
@@ -247,24 +250,47 @@ async function processWebhookActivity(
     }
   }
 
-  // 8. Process game state (XP, quests, milestones, streaks)
+  // 8. Fetch weather data (if API key available and activity has location)
+  if (env.OPENWEATHERMAP_API_KEY && activity.start_latlng?.length === 2) {
+    try {
+      const weather = await fetchActivityWeather(
+        activity.start_latlng[0],
+        activity.start_latlng[1],
+        env.OPENWEATHERMAP_API_KEY,
+      );
+      if (weather) {
+        await env.MAF_ACTIVITIES.put(
+          `${athleteId}:weather:${activityId}`,
+          JSON.stringify(weather),
+        );
+      }
+    } catch (err) {
+      console.log(`[webhook] Weather fetch failed: ${err}`);
+    }
+  }
+
+  // 9. Process game state (points, badges, streaks)
   const gameResult = await processNewRun(env.MAF_GAME, athleteId, analysis, settings);
 
+  const badgeNames = gameResult.badges_earned.map((b) => b.name);
   console.log(
     `[webhook] Activity ${activityId} processed: ` +
     `qualifying=${analysis.qualifying}, ` +
     `xp=${gameResult.xp_earned}, ` +
     `zone_min=${analysis.zone_minutes.toFixed(1)}, ` +
-    `milestones=${gameResult.milestones_unlocked.join(',') || 'none'}, ` +
-    `quest=${gameResult.quest_completed || 'none'}`
+    `badges=${badgeNames.join(',') || 'none'}, ` +
+    `surprises=${gameResult.surprise_bonuses.map((s) => s.id).join(',') || 'none'}`
   );
 
-  // 9. Generate coaching assessment (if API key is available)
-  if (env.ANTHROPIC_API_KEY && analysis.qualifying) {
+  // 9. Generate coaching assessment (if API key is available and coaching enabled)
+  if (env.ANTHROPIC_API_KEY && env.COACHING_ENABLED === 'true' && analysis.qualifying) {
     try {
       // Load recent activities for context
       const recentActivities = await loadRecentAnalyses(env, athleteId, 10);
       const gameState = await loadGameState(env.MAF_GAME, athleteId);
+
+      const { buildNextStep } = await import('./lib/gameState');
+      const nextStep = buildNextStep(gameState);
 
       const payload = buildPostRunPayload(
         analysis,
@@ -273,12 +299,24 @@ async function processWebhookActivity(
         settings,
         gameResult.xp_earned,
         gameResult.xp_breakdown as unknown as Record<string, number>,
-        gameResult.milestones_unlocked,
-        gameResult.quest_completed
+        gameResult.badges_earned.map((b) => b.name),
+        gameResult.surprise_bonuses.map((s) => s.message),
+        nextStep.message,
       );
 
       const coaching = await generatePostRunCoaching(env.ANTHROPIC_API_KEY, payload);
       await cacheCoaching(env.MAF_GAME, athleteId, activityId, coaching);
+
+      // Store v2 game result data alongside coaching for frontend
+      if (gameResult.badges_earned.length > 0 || gameResult.surprise_bonuses.length > 0) {
+        await env.MAF_GAME.put(
+          `${athleteId}:coaching_game:${activityId}`,
+          JSON.stringify({
+            badges_earned: gameResult.badges_earned.map((b) => ({ id: b.id, name: b.name, icon: b.icon, message: b.message })),
+            surprise_bonuses: gameResult.surprise_bonuses.map((s) => ({ id: s.id, name: s.name, message: s.message })),
+          }),
+        );
+      }
 
       console.log(`[webhook] Coaching generated: "${coaching.headline}"`);
     } catch (err) {
@@ -438,9 +476,16 @@ export default {
         const coaching = await getCachedCoaching(env.MAF_GAME, athleteId, activity.id);
         if (coaching) {
           const analysis = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activity.id}`);
+          // Load v2 game result data (badges/surprises) if available
+          const gameDataRaw = await env.MAF_GAME.get(`${athleteId}:coaching_game:${activity.id}`);
+          const gameData = gameDataRaw ? JSON.parse(gameDataRaw) : {};
           return json({
             activity_id: activity.id,
+            run_name: activity.name,
+            run_date: activity.start_date,
             ...coaching,
+            badges_earned: gameData.badges_earned || [],
+            surprise_bonuses: gameData.surprise_bonuses || [],
             analysis: analysis ? JSON.parse(analysis) : null,
           });
         }
@@ -478,6 +523,9 @@ export default {
       if (auth instanceof Response) return auth;
       const athleteId = auth;
 
+      if (env.COACHING_ENABLED !== 'true') {
+        return json({ error: 'Coaching is a Pro feature' }, 403);
+      }
       if (!env.ANTHROPIC_API_KEY) {
         return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
       }
@@ -497,13 +545,36 @@ export default {
 
       const payload = buildPostRunPayload(
         analysis, recentActivities, gameState, settings,
-        0, {}, [], null
+        0, {}, [], [], null,
       );
 
       const coaching = await generatePostRunCoaching(env.ANTHROPIC_API_KEY, payload);
       await cacheCoaching(env.MAF_GAME, athleteId, activityId, coaching);
 
       return json({ activity_id: activityId, ...coaching });
+    }
+
+    // --- Runner Notes ---
+    const notesMatch = path.match(/^\/api\/notes\/(\d+)$/);
+    if (notesMatch) {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+      const activityId = notesMatch[1];
+      const key = `${athleteId}:notes:${activityId}`;
+
+      if (request.method === 'PUT') {
+        const body = await request.json() as { note: string };
+        const note = (body.note || '').slice(0, 500);
+        await env.MAF_GAME.put(key, JSON.stringify({ note, updated_at: new Date().toISOString() }));
+        return json({ ok: true, note });
+      }
+
+      if (request.method === 'GET') {
+        const raw = await env.MAF_GAME.get(key);
+        if (!raw) return json({ note: '' });
+        return json(JSON.parse(raw));
+      }
     }
 
     // --- Coaching: Weekly Summary (GET) ---
@@ -532,6 +603,9 @@ export default {
       if (auth instanceof Response) return auth;
       const athleteId = auth;
 
+      if (env.COACHING_ENABLED !== 'true') {
+        return json({ error: 'Coaching is a Pro feature' }, 403);
+      }
       if (!env.ANTHROPIC_API_KEY) {
         return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
       }
@@ -557,6 +631,9 @@ export default {
       if (auth instanceof Response) return auth;
       const athleteId = auth;
 
+      if (env.COACHING_ENABLED !== 'true') {
+        return json({ error: 'Coaching is a Pro feature' }, 403);
+      }
       if (!env.ANTHROPIC_API_KEY) {
         return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
       }
@@ -662,11 +739,11 @@ export default {
       // Preserve user's weekly target if they set one
       const existingState = await loadGameState(env.MAF_GAME, athleteId);
       freshState.weekly_target_zone_minutes = existingState.weekly_target_zone_minutes;
-      // Complete first_steps quest since settings exist
-      freshState.quests_completed = ['first_steps'];
-      freshState.quest_active = 'first_maf_run';
-      freshState.quest_progress = { first_steps: 1 };
-      freshState.badges = ['🏃'];
+      // Award "committed" badge since settings exist
+      if (!freshState.badges_earned.includes('committed')) {
+        freshState.badges_earned.push('committed');
+        freshState.xp_total += 50;
+      }
       await saveGameState(env.MAF_GAME, athleteId, freshState);
 
       let processed = 0;
@@ -742,6 +819,79 @@ export default {
       return json({ source: 'computed', analysis });
     }
 
+    // --- Debug: Re-badge — reprocess all runs through badge engine ---
+    if (path === '/api/debug/rebadge' && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) return json({ error: 'No settings' }, 400);
+
+      // Load cached activities
+      const cached = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (!cached) return json({ error: 'No cached activities' }, 400);
+
+      const activities: StravaActivity[] = JSON.parse(cached);
+
+      // Filter by start_date if set
+      let toProcess = activities;
+      if (settings.start_date) {
+        const startTs = new Date(settings.start_date).getTime();
+        toProcess = activities.filter(
+          (a) => new Date(a.start_date).getTime() >= startTs
+        );
+      }
+
+      // Sort chronologically
+      toProcess.sort(
+        (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+      );
+
+      // Reset game state
+      const { createInitialGameState } = await import('./lib/gameTypes');
+      const freshState = createInitialGameState();
+      const existingState = await loadGameState(env.MAF_GAME, athleteId);
+      freshState.weekly_target_zone_minutes = existingState.weekly_target_zone_minutes;
+      if (!freshState.badges_earned.includes('committed')) {
+        freshState.badges_earned.push('committed');
+        freshState.xp_total += 50;
+      }
+      await saveGameState(env.MAF_GAME, athleteId, freshState);
+
+      let processed = 0;
+      const allBadges: string[] = ['committed'];
+
+      for (const activity of toProcess) {
+        // Load cached analysis (skip if not analyzed yet)
+        const analysisRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activity.id}`);
+        if (!analysisRaw) continue;
+        const analysis: MAFActivity = JSON.parse(analysisRaw);
+
+        const result = await processNewRun(env.MAF_GAME, athleteId, analysis, settings);
+
+        for (const badge of result.badges_earned) {
+          if (!allBadges.includes(badge.id)) allBadges.push(badge.id);
+        }
+        processed++;
+      }
+
+      const finalState = await loadGameState(env.MAF_GAME, athleteId);
+      const gameResponse = buildGameAPIResponse(finalState);
+
+      return json({
+        rebadge: {
+          processed,
+          badges_earned: finalState.badges_earned,
+          badge_count: finalState.badges_earned.length,
+          total_xp: finalState.xp_total,
+          lifetime_total_runs: finalState.lifetime_total_runs,
+          lifetime_zone_minutes: finalState.lifetime_zone_minutes,
+        },
+        game: gameResponse,
+      });
+    }
+
     // --- OAuth: Redirect to Strava ---
     if (path === '/api/auth/strava') {
       const baseUrl = getBaseUrl(request);
@@ -793,6 +943,19 @@ export default {
           expires_at: data.expires_at,
         })
       );
+
+      // Store athlete name from Strava profile
+      const athleteName = [data.athlete.firstname, data.athlete.lastname].filter(Boolean).join(' ');
+      if (athleteName) {
+        const existingRaw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
+        if (existingRaw) {
+          const existing = JSON.parse(existingRaw);
+          existing.athlete_name = athleteName;
+          await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(existing));
+        } else {
+          await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify({ athlete_name: athleteName }));
+        }
+      }
 
       const sessionId = generateSessionId();
       await env.MAF_TOKENS.put(`session:${sessionId}`, athleteId, {
@@ -974,6 +1137,7 @@ export default {
         modifier: number;
         units: 'km' | 'mi';
         start_date?: string | null;
+        athlete_name?: string;
       };
 
       if (!body.age || body.age < 10 || body.age > 100) {
@@ -985,23 +1149,26 @@ export default {
 
       const mafHr = 180 - body.age + body.modifier;
 
+      // Preserve athlete_name from existing settings
+      const existingRaw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
+      const existing = existingRaw ? JSON.parse(existingRaw) : {};
+
       const settings = {
+        ...existing,
         age: body.age,
         modifier: body.modifier,
         units: body.units || 'km',
         maf_hr: mafHr,
-
-
-
         start_date: body.start_date || null,
+        ...(body.athlete_name !== undefined && { athlete_name: body.athlete_name }),
       };
 
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
 
       // Complete first_steps quest if active (v2 only)
-      //if (env.MAF_GAME) {
-      //  try { await onSettingsSaved(env.MAF_GAME, athleteId); } catch {}
-     // ``}
+      if (env.MAF_GAME) {
+        try { await onSettingsSaved(env.MAF_GAME, athleteId); } catch {}
+      }
 
       return json({ configured: true, ...settings });
     }

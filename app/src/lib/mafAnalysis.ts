@@ -71,6 +71,7 @@ export interface MAFActivity {
 
 export interface MAFTrend {
   date: string
+  name: string
   // Primary: Heart Rate
   avgHr: number
   rollingHr: number | null
@@ -94,6 +95,7 @@ export interface MAFSummary {
   hrTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
   hrTrendSlope: number | null
   zoneDiscipline: number | null   // now = avg time_below_ceiling_pct
+  zoneTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
   // Secondary
   currentMafPace: number | null
   paceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
@@ -102,6 +104,7 @@ export interface MAFSummary {
   efTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
   avgDecoupling: number | null
   avgCadence: number | null
+  cadenceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
   totalRuns: number
   totalQualifyingRuns: number
   qualifyingPct: number
@@ -120,6 +123,14 @@ interface StreamData {
 
 const METERS_PER_MILE = 1609.344
 const METERS_PER_KM = 1000
+
+// Minimum velocity threshold (m/s): filters out GPS drift, standing still, tying shoes.
+// 0.5 m/s ≈ 53 min/mi — anything slower is not meaningful movement.
+const MIN_VELOCITY = 0.5
+
+// Walking threshold (m/s): below this is walking, not running.
+// 1.7 m/s ≈ 15:45/mi or 9:48/km
+const WALKING_VELOCITY = 1.7
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -269,7 +280,7 @@ function computePaceSteadiness(
   const belowCeilingVelocities: number[] = []
 
   for (let i = 0; i < len; i++) {
-    if (hr[i] <= ceiling && velocity[i] > 0) {
+    if (hr[i] <= ceiling && velocity[i] > MIN_VELOCITY) {
       belowCeilingVelocities.push(velocity[i])
     }
   }
@@ -327,25 +338,33 @@ export function analyzeActivity(
     tierBreakdown = computeTierBreakdown(hr.slice(0, len), tiers)
 
     // ── Pace + cadence while below ceiling ──────────────────────────────
-    let belowCeilingPaceSum = 0
-    let belowCeilingPaceCount = 0
+    // FIX: Average velocities (m/s), then convert to pace once.
+    // Old code averaged pace values, which is mathematically wrong because
+    // pace is inversely proportional to speed. A single near-stop second
+    // (e.g., 0.1 m/s = 268 min/mi) would massively skew the average.
+    let belowCeilingVelocitySum = 0
+    let belowCeilingVelocityCount = 0
     let belowCeilingCadenceSum = 0
     let belowCeilingCadenceCount = 0
 
     for (let i = 0; i < len; i++) {
       if (hr[i] <= tiers.ceiling) {
-        if (velocity[i] > 0) {
-          belowCeilingPaceSum += velocityToPace(velocity[i], units)
-          belowCeilingPaceCount++
+        if (velocity[i] > MIN_VELOCITY) {
+          belowCeilingVelocitySum += velocity[i]
+          belowCeilingVelocityCount++
         }
-        if (cadence && cadence[i] > 0) {
+        // Only count cadence when actually running (not walking)
+        if (cadence && cadence[i] > 0 && velocity[i] > WALKING_VELOCITY) {
           belowCeilingCadenceSum += cadence[i] * 2
           belowCeilingCadenceCount++
         }
       }
     }
 
-    mafPace = belowCeilingPaceCount > 0 ? belowCeilingPaceSum / belowCeilingPaceCount : avgPace
+    // Convert average velocity to pace (correct way)
+    mafPace = belowCeilingVelocityCount > 0
+      ? velocityToPace(belowCeilingVelocitySum / belowCeilingVelocityCount, units)
+      : avgPace
     cadenceInZone = belowCeilingCadenceCount > 0 ? belowCeilingCadenceSum / belowCeilingCadenceCount : null
 
     // ── Cardiac drift ───────────────────────────────────────────────────
@@ -458,9 +477,13 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
 
   if (included.length === 0) return []
 
+  // Adaptive rolling window: ~25% of total data points, minimum 3 runs
+  const windowSize = Math.max(3, Math.round(included.length * 0.25))
+
   return included.map((a, i) => {
-    const fourWeeksAgo = new Date(a.date).getTime() - 28 * 24 * 60 * 60 * 1000
-    const window = included.filter((w, wi) => wi <= i && new Date(w.date).getTime() >= fourWeeksAgo)
+    // Take up to windowSize runs ending at current index
+    const windowStart = Math.max(0, i - windowSize + 1)
+    const window = included.slice(windowStart, i + 1)
 
     const rollingHr = window.length >= 2
       ? window.reduce((sum, w) => sum + w.avg_hr, 0) / window.length
@@ -486,6 +509,7 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
 
     return {
       date: a.date,
+      name: a.name,
       avgHr: a.avg_hr,
       rollingHr,
       mafPace: a.maf_pace,
@@ -512,6 +536,7 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
       hrTrendDirection: 'insufficient',
       hrTrendSlope: null,
       zoneDiscipline: null,
+      zoneTrendDirection: 'insufficient',
       currentMafPace: null,
       paceTrendDirection: 'insufficient',
       paceTrendSlope: null,
@@ -519,6 +544,7 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
       efTrendDirection: 'insufficient',
       avgDecoupling: null,
       avgCadence: null,
+      cadenceTrendDirection: 'insufficient',
       totalRuns: 0,
       totalQualifyingRuns: 0,
       qualifyingPct: 0,
@@ -537,6 +563,8 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     ? recent.reduce((sum, a) => sum + a.avg_hr, 0) / recent.length
     : sorted[sorted.length - 1].avg_hr
 
+  // Pace: already correctly computed per-run, so averaging here is acceptable
+  // (individual run paces are now correct thanks to velocity averaging fix)
   const currentMafPace = recent.length > 0
     ? recent.reduce((sum, a) => sum + a.maf_pace, 0) / recent.length
     : sorted[sorted.length - 1].maf_pace
@@ -578,6 +606,18 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     ? included.reduce((sum, a) => sum + a.time_below_ceiling_pct, 0) / included.length
     : null
 
+  // Zone trend: compare recent 4wk avg to prior 4wk avg
+  let zoneTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
+  if (trendWindow.length >= 3) {
+    const baseTime = new Date(trendWindow[0].date).getTime()
+    const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
+    const zonePoints = trendWindow.map((a) => ({ x: toWeeks(a.date), y: a.time_below_ceiling_pct }))
+    const zoneSlope = linearSlope(zonePoints)
+    if (zoneSlope > 0.5) zoneTrendDirection = 'improving'
+    else if (zoneSlope < -0.5) zoneTrendDirection = 'regressing'
+    else zoneTrendDirection = 'plateau'
+  }
+
   const withDecoupling = qualifying.filter((a) => a.aerobic_decoupling !== null)
   const avgDecoupling = withDecoupling.length > 0
     ? withDecoupling.reduce((sum, a) => sum + a.aerobic_decoupling!, 0) / withDecoupling.length
@@ -588,11 +628,25 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     ? withCadence.reduce((sum, a) => sum + a.cadence_in_zone!, 0) / withCadence.length
     : null
 
+  // Cadence trend
+  let cadenceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
+  const cadenceTrend = trendWindow.filter((a) => a.cadence_in_zone !== null)
+  if (cadenceTrend.length >= 3) {
+    const baseTime = new Date(cadenceTrend[0].date).getTime()
+    const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
+    const cadencePoints = cadenceTrend.map((a) => ({ x: toWeeks(a.date), y: a.cadence_in_zone! }))
+    const cadenceSlope = linearSlope(cadencePoints)
+    if (cadenceSlope > 0.2) cadenceTrendDirection = 'improving'
+    else if (cadenceSlope < -0.2) cadenceTrendDirection = 'regressing'
+    else cadenceTrendDirection = 'plateau'
+  }
+
   return {
     currentAvgHr,
     hrTrendDirection,
     hrTrendSlope,
     zoneDiscipline,
+    zoneTrendDirection,
     currentMafPace,
     paceTrendDirection,
     paceTrendSlope,
@@ -600,6 +654,7 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     efTrendDirection,
     avgDecoupling,
     avgCadence,
+    cadenceTrendDirection,
     totalRuns: included.length,
     totalQualifyingRuns: qualifying.length,
     qualifyingPct: included.length > 0 ? (qualifying.length / included.length) * 100 : 0,
