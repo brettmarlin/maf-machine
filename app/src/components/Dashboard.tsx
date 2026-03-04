@@ -327,7 +327,7 @@ export function Dashboard({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setRulesOpen(true)}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors hidden sm:inline"
+              className="text-sm text-gray-500 hover:text-gray-300 transition-colors hidden sm:inline"
             >
               How it works
             </button>
@@ -339,10 +339,10 @@ export function Dashboard({
                 <img
                   src={settings.avatar_url}
                   alt=""
-                  className="w-6 h-6 rounded-full object-cover shrink-0"
+                  className="w-7 h-7 rounded-full object-cover shrink-0"
                 />
               ) : (
-                <span className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-[10px] shrink-0">
+                <span className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-[11px] shrink-0">
                   {(settings.display_name || settings.athlete_name || '?')[0]?.toUpperCase()}
                 </span>
               )}
