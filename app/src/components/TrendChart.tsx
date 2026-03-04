@@ -183,8 +183,8 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none [&_*]:outline-none [&_svg]:outline-none [&_svg]:!outline-0" tabIndex={-1} style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}>
       {/* Unified toggle-legend row */}
-      <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
           {/* HR — always on, not toggleable */}
           <span className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg bg-white/10 text-white border border-white/20">
             <svg width="7" height="6" viewBox="0 0 7 6" className="shrink-0">
@@ -216,7 +216,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
           })}
         </div>
 
-        {/* Spacer + date picker at right end */}
+        {/* Spacer + date picker — outside overflow container so dropdown isn't clipped */}
         {datePickerSlot && (
           <>
             <div className="flex-1 min-w-[8px]" />

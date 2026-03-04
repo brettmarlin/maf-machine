@@ -230,7 +230,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
       {/* Trigger — compact, mobile-safe */}
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-2.5 py-1.5 rounded-lg transition-colors"
+        className="flex items-center gap-1.5 text-xs bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
       >
         <span className="text-gray-300">
           {value.label}
