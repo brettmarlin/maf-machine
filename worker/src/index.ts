@@ -1210,10 +1210,7 @@ export default {
         }
 
         const batch: StravaActivity[] = await res.json();
-        const runs = batch.filter(
-          (a: StravaActivity) => a.type === 'Run' || a.sport_type === 'Run'
-        );
-        newActivities = newActivities.concat(runs);
+        newActivities = newActivities.concat(batch);
 
         if (batch.length < 100) {
           hasMore = false;

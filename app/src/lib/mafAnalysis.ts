@@ -29,6 +29,7 @@ export interface MAFActivity {
   id: number
   date: string
   name: string
+  sport_type: string
   duration_seconds: number
   distance_meters: number
   elevation_gain: number
@@ -427,6 +428,7 @@ export function analyzeActivity(
     id: activity.id,
     date: activity.start_date,
     name: activity.name,
+    sport_type: activity.sport_type || activity.type || '',
     duration_seconds: activity.elapsed_time,
     distance_meters: activity.distance,
     elevation_gain: activity.total_elevation_gain || 0,

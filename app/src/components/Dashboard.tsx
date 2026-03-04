@@ -154,17 +154,18 @@ export function Dashboard({
 
   const ACTIVITY_FILTERS = ['All', 'Running', 'Walking', 'Swimming', 'Cycling', 'Other'] as const
 
+  function getActivityCategory(type: string): 'running' | 'walking' | 'swimming' | 'cycling' | 'other' {
+    const t = type?.toLowerCase?.() ?? ''
+    if (['run', 'trailrun', 'virtualrun'].includes(t)) return 'running'
+    if (['walk', 'hike'].includes(t)) return 'walking'
+    if (['swim'].includes(t)) return 'swimming'
+    if (['ride', 'virtualride', 'ebike_ride', 'ebikeride', 'mountainbikeride', 'handcycle', 'velomobile'].includes(t)) return 'cycling'
+    return 'other'
+  }
+
   function matchesActivityFilter(activity: MAFActivity, filter: string): boolean {
     if (filter === 'All') return true
-    const t = (activity as any).sport_type || (activity as any).type || ''
-    switch (filter) {
-      case 'Running': return /^(Run|TrailRun|VirtualRun)$/i.test(t)
-      case 'Walking': return /^(Walk|Hike)$/i.test(t)
-      case 'Swimming': return /^Swim$/i.test(t)
-      case 'Cycling': return /^(Ride|VirtualRide|EBikeRide|MountainBikeRide)$/i.test(t)
-      case 'Other': return !(/^(Run|TrailRun|VirtualRun|Walk|Hike|Swim|Ride|VirtualRide|EBikeRide|MountainBikeRide)$/i.test(t))
-      default: return true
-    }
+    return getActivityCategory(activity.sport_type) === filter.toLowerCase()
   }
 
   const displayActivities = useMemo(
@@ -459,7 +460,7 @@ export function Dashboard({
                   <span className="w-5 shrink-0 hidden sm:inline"></span>
                   <span className="flex-1">Run</span>
                   <span className="w-14 text-right">HR</span>
-                  <span className="w-10 text-right">In Zone</span>
+                  <span className="w-10 text-right">Zone</span>
                   <span className="w-16 text-right">Pace</span>
                   <span className="w-10 text-right hidden sm:inline">EF</span>
                   <span className="w-6 text-center">Q</span>
@@ -489,7 +490,7 @@ export function Dashboard({
 
                     {/* Activity type icon — desktop only */}
                     <span className="w-5 shrink-0 text-center hidden sm:inline">
-                      <ActivityIcon type={(a as any).sport_type || (a as any).type} />
+                      <ActivityIcon type={a.sport_type} />
                     </span>
 
                     {/* Name + quality badge + Strava link */}
