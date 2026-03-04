@@ -156,25 +156,8 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
         </div>
       </div>
 
-      {/* Secondary: Below Ceiling, Cadence, Efficiency — compact full-width cards */}
+      {/* Secondary: Cadence, Time in Zone, Efficiency — compact full-width cards */}
       <div className="grid grid-cols-3 gap-2">
-        {/* Time in Zone */}
-        <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
-              Time in Zone
-              <InfoTooltip text="Percentage of run time at or below your MAF ceiling. Higher is better — aim for 80%+ as your discipline improves." />
-            </p>
-            <span className={`text-[10px] ${trendColor(summary.zoneTrendDirection)}`}>
-              {trendArrow(summary.zoneTrendDirection, 'ef')} {trendLabel(summary.zoneTrendDirection, 'ef')}
-            </span>
-          </div>
-          <p className="text-lg font-semibold text-gray-300 mt-1">
-            {summary.zoneDiscipline !== null ? `${summary.zoneDiscipline.toFixed(0)}%` : '—'}
-            <span className="text-xs font-normal text-gray-600 ml-1">≤{mafHr}</span>
-          </p>
-        </div>
-
         {/* Cadence */}
         <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
           <div>
@@ -192,22 +175,37 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
           </p>
         </div>
 
+        {/* Time in Zone */}
+        <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">
+              Time in Zone
+              <InfoTooltip text="Percentage of run time at or below your MAF ceiling. Higher is better — aim for 80%+ as your discipline improves." />
+            </p>
+            <span className={`text-[10px] ${trendColor(summary.zoneTrendDirection)}`}>
+              {trendArrow(summary.zoneTrendDirection, 'ef')} {trendLabel(summary.zoneTrendDirection, 'ef')}
+            </span>
+          </div>
+          <p className="text-lg font-semibold text-gray-300 mt-1">
+            {summary.zoneDiscipline !== null ? `${summary.zoneDiscipline.toFixed(0)}%` : '—'}
+            <span className="text-xs font-normal text-gray-600 ml-1">≤{mafHr}</span>
+          </p>
+        </div>
+
         {/* Efficiency */}
         <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
-          <div className="flex items-center justify-between">
+          <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide">
               Efficiency
               <InfoTooltip text="Efficiency Factor: meters per minute divided by heart rate. Higher means more distance per heartbeat." />
-            </p>
-          </div>
-          <div className="flex items-baseline justify-between mt-1">
-            <p className="text-lg font-semibold text-gray-300">
-              {summary.currentEf !== null ? formatEF(summary.currentEf) : '—'}
             </p>
             <span className={`text-[10px] ${trendColor(summary.efTrendDirection)}`}>
               {trendArrow(summary.efTrendDirection, 'ef')} {trendLabel(summary.efTrendDirection, 'ef')}
             </span>
           </div>
+          <p className="text-lg font-semibold text-gray-300 mt-1">
+            {summary.currentEf !== null ? formatEF(summary.currentEf) : '—'}
+          </p>
         </div>
       </div>
     </div>
