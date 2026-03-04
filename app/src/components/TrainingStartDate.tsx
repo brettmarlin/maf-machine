@@ -54,7 +54,7 @@ export function TrainingStartDate({ onComplete }: Props) {
         {/* Heading */}
         <div className="space-y-2">
           <h1 className="text-2xl font-bold">
-            One more thing — when did you start MAF training?
+            When did you start MAF training?
           </h1>
           <p className="text-gray-400 text-sm leading-relaxed">
             If you've been doing MAF runs, we'll analyze your history and you might already be a few levels in.

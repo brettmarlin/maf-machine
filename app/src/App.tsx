@@ -135,32 +135,32 @@ export default function App() {
     init()
   }, [])
 
-  // Callback: setup complete → show badge celebration
+  // Callback: setup complete → advance to start_date
   const handleSetupComplete = useCallback(async () => {
     await Promise.all([refreshSettings(), refreshGameState()])
-    setForceState('setup_celebration')
-  }, [])
-
-  // Callback: celebration dismissed → advance to start_date
-  const handleCelebrationDone = useCallback(() => {
     setForceState('start_date')
   }, [])
 
-  // Callback: start date complete → advance to backfill or dashboard
-  const handleStartDateComplete = useCallback(async (isToday: boolean) => {
+  // Callback: start date complete → advance to backfill or celebration
+  const handleStartDateComplete = useCallback(async (skipBackfill: boolean) => {
     await refreshSettings()
-    if (isToday) {
-      // Mark backfill as done and go to dashboard
+    if (skipBackfill) {
+      // No backfill needed — go to celebration
       await refreshGameState()
-      setForceState('dashboard')
+      setForceState('setup_celebration')
     } else {
       setForceState('backfill')
     }
   }, [])
 
-  // Callback: backfill complete → advance to dashboard
+  // Callback: backfill complete → advance to celebration
   const handleBackfillComplete = useCallback(async () => {
     await refreshGameState()
+    setForceState('setup_celebration')
+  }, [])
+
+  // Callback: celebration dismissed → advance to dashboard
+  const handleCelebrationDone = useCallback(() => {
     setForceState('dashboard')
   }, [])
 
