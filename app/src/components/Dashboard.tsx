@@ -34,6 +34,9 @@ interface Settings {
   athlete_name?: string
   display_name?: string
   avatar_url?: string
+  firstname?: string
+  lastname?: string
+  profile?: string
 }
 
 // Activity type icons from Strava sport_type
@@ -71,7 +74,6 @@ export function Dashboard({
   const [rulesOpen, setRulesOpen] = useState(false)
 
   // Badge celebration state
-  const [activityFilter, setActivityFilter] = useState<string>('All')
   const [celebrationQueue, setCelebrationQueue] = useState<BadgeDefinition[]>([])
   const [showBulkCelebration, setShowBulkCelebration] = useState(false)
   const seenBadgesRef = useRef<Set<string>>(new Set(
@@ -150,27 +152,6 @@ export function Dashboard({
   const filteredSummary = useMemo(
     () => (filteredActivities.length > 0 ? computeSummary(filteredActivities) : null),
     [filteredActivities]
-  )
-
-  const ACTIVITY_FILTERS = ['All', 'Running', 'Walking', 'Swimming', 'Cycling', 'Other'] as const
-
-  function getActivityCategory(type: string): 'running' | 'walking' | 'swimming' | 'cycling' | 'other' {
-    const t = type?.toLowerCase?.() ?? ''
-    if (['run', 'trailrun', 'virtualrun'].includes(t)) return 'running'
-    if (['walk', 'hike'].includes(t)) return 'walking'
-    if (['swim'].includes(t)) return 'swimming'
-    if (['ride', 'virtualride', 'ebike_ride', 'ebikeride', 'mountainbikeride', 'handcycle', 'velomobile'].includes(t)) return 'cycling'
-    return 'other'
-  }
-
-  function matchesActivityFilter(activity: MAFActivity, filter: string): boolean {
-    if (filter === 'All') return true
-    return getActivityCategory(activity.sport_type) === filter.toLowerCase()
-  }
-
-  const displayActivities = useMemo(
-    () => filteredActivities.filter((a) => matchesActivityFilter(a, activityFilter)),
-    [filteredActivities, activityFilter]
   )
 
   function mergeIntoCache(newActivities: MAFActivity[]) {
@@ -357,19 +338,19 @@ export function Dashboard({
               onClick={() => setSidebarOpen(true)}
               className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-2 pr-2.5 py-1.5 rounded-lg transition-colors"
             >
-              {settings.avatar_url ? (
+              {(settings.profile || settings.avatar_url) ? (
                 <img
-                  src={settings.avatar_url}
+                  src={settings.profile || settings.avatar_url}
                   alt=""
                   className="w-7 h-7 rounded-full object-cover shrink-0"
                 />
               ) : (
                 <span className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-[11px] shrink-0">
-                  {(settings.display_name || settings.athlete_name || '?')[0]?.toUpperCase()}
+                  {(settings.firstname || settings.display_name || settings.athlete_name || '?')[0]?.toUpperCase()}
                 </span>
               )}
               <span className="text-gray-300 text-xs truncate max-w-[80px] sm:max-w-none">
-                {settings.display_name || settings.athlete_name?.split(' ')[0] || 'Settings'}
+                {settings.firstname || settings.display_name || settings.athlete_name?.split(' ')[0] || 'Settings'}
               </span>
               <span className="text-gray-700">·</span>
               <span className="text-green-500 font-medium">{mafHr}</span>
@@ -436,23 +417,6 @@ export function Dashboard({
           {/* Run List */}
           {filteredActivities.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
-              {/* Activity type filter pills */}
-              <div className="px-4 pt-3 pb-2 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-                {ACTIVITY_FILTERS.map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setActivityFilter(f)}
-                    className={`text-xs px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap border ${
-                      activityFilter === f
-                        ? 'bg-white/10 text-white border-white/20'
-                        : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-
               {/* Table Header */}
               <div className="px-4 py-3 border-b border-gray-800">
                 <div className="flex items-center gap-3 text-xs text-gray-500 uppercase tracking-wide">
@@ -467,13 +431,13 @@ export function Dashboard({
                   <span className="w-10 text-center hidden sm:inline">Inc.</span>
                 </div>
                 <p className="text-[10px] text-gray-600 mt-1">
-                  {displayActivities.length} runs{displayActivities.length !== filteredActivities.length ? ` of ${filteredActivities.length} in range` : ''}
+                  {filteredActivities.length} runs{filteredActivities.length !== allActivities.length ? ` of ${allActivities.length} total` : ''}
                 </p>
               </div>
 
               {/* Table Body */}
               <div className="divide-y divide-gray-800/50 max-h-96 overflow-y-auto">
-                {displayActivities.map((a) => (
+                {filteredActivities.map((a) => (
                   <div
                     key={a.id}
                     className={`px-4 py-2.5 flex items-center gap-3 text-sm transition-opacity ${

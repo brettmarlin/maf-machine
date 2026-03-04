@@ -1114,16 +1114,20 @@ export default {
         })
       );
 
-      // Store athlete name + avatar from Strava profile
-      const athleteName = [data.athlete.firstname, data.athlete.lastname].filter(Boolean).join(' ');
-      const avatarUrl = data.athlete.profile_medium || data.athlete.profile || '';
-      const displayName = data.athlete.firstname || '';
+      // Store athlete data from Strava profile
       {
         const existingRaw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
         const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        const firstname = data.athlete.firstname || '';
+        const lastname = data.athlete.lastname || '';
+        const profile = data.athlete.profile_medium || data.athlete.profile || '';
+        const athleteName = [firstname, lastname].filter(Boolean).join(' ');
+        if (firstname) existing.firstname = firstname;
+        if (lastname) existing.lastname = lastname;
+        if (profile) existing.profile = profile;
         if (athleteName) existing.athlete_name = athleteName;
-        if (displayName) existing.display_name = displayName;
-        if (avatarUrl) existing.avatar_url = avatarUrl;
+        if (firstname) existing.display_name = firstname;
+        if (profile) existing.avatar_url = profile;
         await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(existing));
       }
 
@@ -1210,7 +1214,11 @@ export default {
         }
 
         const batch: StravaActivity[] = await res.json();
-        newActivities = newActivities.concat(batch);
+        const RUN_TYPES = ['Run', 'TrailRun', 'VirtualRun'];
+        const runs = batch.filter(
+          (a) => RUN_TYPES.includes(a.type) || RUN_TYPES.includes(a.sport_type)
+        );
+        newActivities = newActivities.concat(runs);
 
         if (batch.length < 100) {
           hasMore = false;

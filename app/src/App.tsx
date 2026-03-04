@@ -25,6 +25,9 @@ export interface Settings {
   training_start_date?: string | null
   display_name?: string
   avatar_url?: string
+  firstname?: string
+  lastname?: string
+  profile?: string
 }
 
 interface GameSummary {

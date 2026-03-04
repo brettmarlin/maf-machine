@@ -14,6 +14,9 @@ interface Settings {
   athlete_name?: string
   display_name?: string
   avatar_url?: string
+  firstname?: string
+  lastname?: string
+  profile?: string
   // Legacy fields (may still arrive from KV)
   maf_zone_low?: number
   maf_zone_high?: number
@@ -37,7 +40,10 @@ interface Props {
 }
 
 export function SettingsSidebar({ open, onClose, currentSettings, athleteName, onSync, devMode }: Props) {
-  const [name, setName] = useState<string>(currentSettings?.athlete_name || athleteName || '')
+  const [name, setName] = useState<string>(
+    currentSettings?.athlete_name || athleteName ||
+    [currentSettings?.firstname, currentSettings?.lastname].filter(Boolean).join(' ') || ''
+  )
   const [age, setAge] = useState<number>(currentSettings?.age ?? 35)
   const [modifier, setModifier] = useState<number>(currentSettings?.modifier ?? 0)
   const [units, setUnits] = useState<'km' | 'mi'>(currentSettings?.units ?? 'mi')
@@ -258,15 +264,15 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           {/* Header with avatar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {currentSettings?.avatar_url ? (
+              {(currentSettings?.profile || currentSettings?.avatar_url) ? (
                 <img
-                  src={currentSettings.avatar_url}
+                  src={currentSettings.profile || currentSettings.avatar_url}
                   alt=""
                   className="w-10 h-10 rounded-full object-cover shrink-0"
                 />
               ) : (
                 <span className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm shrink-0">
-                  {(name || '?')[0]?.toUpperCase()}
+                  {(currentSettings?.firstname || name || '?')[0]?.toUpperCase()}
                 </span>
               )}
               <h2 className="text-lg font-semibold text-white">Settings</h2>
