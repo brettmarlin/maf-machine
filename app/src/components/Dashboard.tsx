@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { SummaryCards } from './SummaryCards'
 import { TrendChart } from './TrendChart'
 import { SettingsSidebar } from './SettingsSidebar'
-import { CoachCard } from './CoachCard'
 import { GameCard } from './GameCard'
 import { RulesOfTheGame } from './RulesOfTheGame'
 import { BadgeCelebration, BulkBadgeCelebration } from './BadgeCelebration'
@@ -28,6 +27,7 @@ interface Settings {
   units?: 'km' | 'mi'
   maf_hr?: number
   start_date?: string | null
+  training_start_date?: string | null
   maf_zone_low?: number
   maf_zone_high?: number
   qualifying_tolerance?: number
@@ -57,13 +57,13 @@ export function Dashboard({
   const [syncStatus, setSyncStatus] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(!initialSettings.configured)
+  const trainingStart = initialSettings.training_start_date || initialSettings.start_date
   const [dateRange, setDateRange] = useState<DateRange>(() =>
-    getDefaultRange(initialSettings.start_date)
+    getDefaultRange(trainingStart)
   )
   const lastSyncRange = useRef<string>('')
 
   // Coaching + Game state
-  const [coaching, setCoaching] = useState<any>(null)
   const [gameState, setGameState] = useState<any>(null)
   const [coachLoading, setCoachLoading] = useState(true)
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -88,14 +88,7 @@ export function Dashboard({
     async function fetchCoachData() {
       setCoachLoading(true)
       try {
-        const [coachRes, gameRes] = await Promise.all([
-          fetch(`${BASE_PATH}/api/coaching/latest`),
-          fetch(`${BASE_PATH}/api/game`),
-        ])
-        if (coachRes.ok) {
-          const data = await coachRes.json()
-          if (data && data.headline) setCoaching(data)
-        }
+        const gameRes = await fetch(`${BASE_PATH}/api/game`)
         if (gameRes.ok) {
           const data = await gameRes.json()
           if (data && typeof data.level === 'number') {
@@ -277,11 +270,13 @@ export function Dashboard({
       // Clear cache so activities get re-analyzed with new settings
       localStorage.removeItem('maf_activities')
       setAllActivities([])
-      setDateRange(getDefaultRange(updated.start_date))
+      const updatedStart = updated.training_start_date || updated.start_date
+      setDateRange(getDefaultRange(updatedStart))
     }
     setSidebarOpen(false)
     if (updated) {
-      setTimeout(() => syncActivities(getDefaultRange(updated.start_date)), 100)
+      const updatedStart = updated.training_start_date || updated.start_date
+      setTimeout(() => syncActivities(getDefaultRange(updatedStart)), 100)
     }
   }
 
@@ -314,6 +309,7 @@ export function Dashboard({
         currentSettings={settings}
         athleteName={settings.athlete_name}
         onSync={() => syncActivities(dateRange)}
+        devMode={gameState?.dev_mode === true}
       />
 
       {/* Header */}
@@ -325,35 +321,29 @@ export function Dashboard({
             <h1 className="text-lg font-bold">MAF Machine</h1>
           </div>
 
-          {/* Center-right: How it works + Upgrade */}
-          <div className="flex items-center gap-3 hidden sm:flex">
+          {/* Right: How it works + settings block */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setRulesOpen(true)}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors hidden sm:inline"
             >
               How it works
             </button>
-            <span className="text-gray-800">·</span>
-            <button className="text-xs font-medium text-green-500/80 hover:text-green-400 transition-colors">
-              Upgrade to Pro
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-3 pr-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <span className="text-gray-300 text-xs truncate max-w-[80px] sm:max-w-none">
+                {settings.athlete_name?.split(' ')[0] || 'Settings'}
+              </span>
+              <span className="text-gray-700">·</span>
+              <span className="text-orange-400 font-medium">{mafHr}</span>
+              <span className="text-gray-600 text-xs hidden sm:inline">bpm · {age} yrs</span>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="text-gray-600 shrink-0 ml-0.5">
+                <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           </div>
-
-          {/* Right: Unified settings block */}
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-3 pr-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <span className="text-gray-300 text-xs truncate max-w-[80px] sm:max-w-none">
-              {settings.athlete_name?.split(' ')[0] || 'Settings'}
-            </span>
-            <span className="text-gray-700">·</span>
-            <span className="text-orange-400 font-medium">{mafHr}</span>
-            <span className="text-gray-600 text-xs hidden sm:inline">bpm · {age} yrs</span>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="text-gray-600 shrink-0 ml-0.5">
-              <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
         </div>
       </header>
 
@@ -382,12 +372,18 @@ export function Dashboard({
             loading={coachLoading}
           />
 
-          {/* Coach Card */}
-          <CoachCard
-            coaching={coaching}
-            game={gameState}
-            loading={coachLoading}
-            coachingEnabled={false}
+          {/* Trend Chart — date picker integrated into toggle bar */}
+          <TrendChart
+            trends={filteredTrends}
+            units={units}
+            mafHr={mafHr}
+            datePickerSlot={
+              <DateRangePicker
+                value={dateRange}
+                onChange={setDateRange}
+                trainingStartDate={settings.training_start_date || settings.start_date}
+              />
+            }
           />
 
           {/* Summary Cards */}
@@ -397,22 +393,6 @@ export function Dashboard({
               trends={filteredTrends}
               units={units}
               mafHr={mafHr}
-            />
-          )}
-
-          {/* Trend Chart — date picker integrated into toggle bar */}
-          {filteredTrends.length > 0 && (
-            <TrendChart
-              trends={filteredTrends}
-              units={units}
-              mafHr={mafHr}
-              datePickerSlot={
-                <DateRangePicker
-                  value={dateRange}
-                  onChange={setDateRange}
-                  trainingStartDate={settings.start_date}
-                />
-              }
             />
           )}
 
@@ -530,6 +510,13 @@ export function Dashboard({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+          {filteredActivities.length === 0 && allActivities.length === 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+              <p className="text-sm text-gray-500">
+                Your first run will show up after syncing with Strava
+              </p>
             </div>
           )}
 
