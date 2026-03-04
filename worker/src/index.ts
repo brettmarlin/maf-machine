@@ -1,5 +1,6 @@
 import { analyzeActivity } from './lib/mafAnalysis';
 import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './lib/mafAnalysis';
+import type { GameState } from './lib/gameTypes';
 import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
 import { fetchActivityWeather } from './lib/weatherService';
 import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
@@ -439,8 +440,12 @@ export default {
       const athleteId = auth;
 
       const state = await loadGameState(env.MAF_GAME, athleteId);
-      const response = buildGameAPIResponse(state);
-      return json(response);
+      const userSettings = await loadSettings(env, athleteId);
+      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr } : undefined);
+      return json({
+        ...response,
+        ...(env.DEV_MODE === 'true' ? { dev_mode: true } : {}),
+      });
     }
 
     // --- Game Settings (weekly target) ---
@@ -719,10 +724,11 @@ export default {
 
       const activities: StravaActivity[] = JSON.parse(cached);
 
-      // Filter by start_date if set
+      // Filter by training_start_date (or legacy start_date)
       let toProcess = activities;
-      if (settings.start_date) {
-        const startTs = new Date(settings.start_date).getTime();
+      const filterDate = settings.training_start_date || settings.start_date;
+      if (filterDate) {
+        const startTs = new Date(filterDate).getTime();
         toProcess = activities.filter(
           (a) => new Date(a.start_date).getTime() >= startTs
         );
@@ -774,6 +780,8 @@ export default {
       }
 
       const finalState = await loadGameState(env.MAF_GAME, athleteId);
+      finalState.backfill_complete = true;
+      await saveGameState(env.MAF_GAME, athleteId, finalState);
       const gameResponse = buildGameAPIResponse(finalState);
 
       return json({
@@ -892,6 +900,136 @@ export default {
       });
     }
 
+    // --- Debug: Reset onboarding (for testing flow) ---
+    if (path === '/api/debug/reset-onboarding' && request.method === 'DELETE') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      // Clear settings (keeps tokens so auth still works)
+      await env.MAF_SETTINGS.delete(`${athleteId}:settings`);
+
+      // Reset game state
+      const { createInitialGameState } = await import('./lib/gameTypes');
+      await env.MAF_GAME.put(`${athleteId}:game`, JSON.stringify(createInitialGameState()));
+
+      return json({ reset: true, athleteId });
+    }
+
+    // --- Debug: Set stage (for testing game progression) ---
+    if (path === '/api/debug/set-stage' && request.method === 'POST') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const body = await request.json() as { stage?: string };
+      const STAGE_PRESETS: Record<string, Partial<GameState>> = {
+        new: {
+          xp_total: 0,
+          badges_earned: [],
+          badges_progress: {},
+          streak_current_weeks: 0,
+          streak_longest: 0,
+          streak: { current_weeks: 0, longest_ever: 0, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 0,
+          total_zone_minutes: 0,
+          lifetime_qualifying_runs: 0,
+          total_qualifying_runs: 0,
+          lifetime_total_runs: 0,
+          weekly_history: [],
+          personal_records: { longest_zone_streak_minutes: 0, best_cardiac_drift: null, best_warmup_score: 0 },
+          backfill_complete: true,
+        },
+        week1: {
+          xp_total: 400,
+          badges_earned: ['committed', 'first_spark', 'took_initiative'],
+          streak_current_weeks: 0,
+          streak_longest: 0,
+          streak: { current_weeks: 0, longest_ever: 0, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 45,
+          total_zone_minutes: 45,
+          lifetime_qualifying_runs: 2,
+          total_qualifying_runs: 2,
+          lifetime_total_runs: 3,
+          backfill_complete: true,
+        },
+        week2: {
+          xp_total: 1200,
+          badges_earned: ['committed', 'first_spark', 'took_initiative', 'three_for_three', 'showing_up', 'first_five', 'dialed_in'],
+          streak_current_weeks: 1,
+          streak_longest: 1,
+          streak: { current_weeks: 1, longest_ever: 1, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 140,
+          total_zone_minutes: 140,
+          lifetime_qualifying_runs: 5,
+          total_qualifying_runs: 5,
+          lifetime_total_runs: 6,
+          backfill_complete: true,
+        },
+        month1: {
+          xp_total: 3000,
+          badges_earned: ['committed', 'first_spark', 'took_initiative', 'three_for_three', 'showing_up', 'first_five', 'dialed_in', 'full_week', 'two_week_fire', 'seedling'],
+          streak_current_weeks: 4,
+          streak_longest: 4,
+          streak: { current_weeks: 4, longest_ever: 4, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 450,
+          total_zone_minutes: 450,
+          lifetime_qualifying_runs: 12,
+          total_qualifying_runs: 12,
+          lifetime_total_runs: 14,
+          backfill_complete: true,
+        },
+        month3: {
+          xp_total: 11000,
+          badges_earned: [
+            'committed', 'first_spark', 'took_initiative', 'three_for_three', 'showing_up', 'first_five',
+            'dialed_in', 'full_week', 'two_week_fire', 'seedling',
+            'month_strong', 'eight_week_wall', 'taking_root', 'zone_locked', 'drift_buster', 'long_haul',
+          ],
+          streak_current_weeks: 12,
+          streak_longest: 12,
+          streak: { current_weeks: 12, longest_ever: 12, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 1200,
+          total_zone_minutes: 1200,
+          lifetime_qualifying_runs: 35,
+          total_qualifying_runs: 35,
+          lifetime_total_runs: 40,
+          backfill_complete: true,
+        },
+        veteran: {
+          xp_total: 28000,
+          badges_earned: [
+            'committed', 'first_spark', 'took_initiative', 'three_for_three', 'showing_up', 'first_five',
+            'dialed_in', 'full_week', 'two_week_fire', 'seedling',
+            'month_strong', 'eight_week_wall', 'taking_root', 'zone_locked', 'drift_buster', 'long_haul',
+            'the_commitment', 'deep_roots', 'summit_seeker', 'patience_practice', 'ultra_steady', 'negative_splitter',
+          ],
+          streak_current_weeks: 26,
+          streak_longest: 26,
+          streak: { current_weeks: 26, longest_ever: 26, last_qualified_week: null, frozen: false },
+          lifetime_zone_minutes: 3000,
+          total_zone_minutes: 3000,
+          lifetime_qualifying_runs: 90,
+          total_qualifying_runs: 90,
+          lifetime_total_runs: 100,
+          backfill_complete: true,
+        },
+      };
+
+      const preset = body.stage ? STAGE_PRESETS[body.stage] : null;
+      if (!preset) {
+        return json({ error: `Unknown stage. Valid: ${Object.keys(STAGE_PRESETS).join(', ')}` }, 400);
+      }
+
+      const { createInitialGameState } = await import('./lib/gameTypes');
+      const state = { ...createInitialGameState(), ...preset, updated_at: new Date().toISOString() } as GameState;
+      await saveGameState(env.MAF_GAME, athleteId, state);
+
+      const userSettings = await loadSettings(env, athleteId);
+      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr } : undefined);
+      return json({ stage: body.stage, game: response });
+    }
+
     // --- OAuth: Redirect to Strava ---
     if (path === '/api/auth/strava') {
       const baseUrl = getBaseUrl(request);
@@ -944,17 +1082,17 @@ export default {
         })
       );
 
-      // Store athlete name from Strava profile
+      // Store athlete name + avatar from Strava profile
       const athleteName = [data.athlete.firstname, data.athlete.lastname].filter(Boolean).join(' ');
-      if (athleteName) {
+      const avatarUrl = data.athlete.profile_medium || data.athlete.profile || '';
+      const displayName = data.athlete.firstname || '';
+      {
         const existingRaw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
-        if (existingRaw) {
-          const existing = JSON.parse(existingRaw);
-          existing.athlete_name = athleteName;
-          await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(existing));
-        } else {
-          await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify({ athlete_name: athleteName }));
-        }
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        if (athleteName) existing.athlete_name = athleteName;
+        if (displayName) existing.display_name = displayName;
+        if (avatarUrl) existing.avatar_url = avatarUrl;
+        await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(existing));
       }
 
       const sessionId = generateSessionId();
@@ -1133,34 +1271,42 @@ export default {
       const athleteId = auth;
 
       const body = await request.json() as {
-        age: number;
-        modifier: number;
-        units: 'km' | 'mi';
+        age?: number;
+        modifier?: number;
+        units?: 'km' | 'mi';
         start_date?: string | null;
         athlete_name?: string;
+        training_start_date?: string | null;
       };
 
-      if (!body.age || body.age < 10 || body.age > 100) {
-        return json({ error: 'Invalid age' }, 400);
-      }
-      if (![-10, -5, 0, 5].includes(body.modifier)) {
-        return json({ error: 'Invalid modifier' }, 400);
-      }
-
-      const mafHr = 180 - body.age + body.modifier;
-
-      // Preserve athlete_name from existing settings
+      // Preserve existing settings
       const existingRaw = await env.MAF_SETTINGS.get(`${athleteId}:settings`);
       const existing = existingRaw ? JSON.parse(existingRaw) : {};
 
+      // Partial update: only overwrite fields that are provided
+      const age = body.age ?? existing.age;
+      const modifier = body.modifier ?? existing.modifier ?? 0;
+
+      if (age !== undefined) {
+        if (age < 10 || age > 100) {
+          return json({ error: 'Invalid age' }, 400);
+        }
+      }
+      if (body.modifier !== undefined && ![-10, -5, 0, 5].includes(body.modifier)) {
+        return json({ error: 'Invalid modifier' }, 400);
+      }
+
+      const mafHr = age ? 180 - age + modifier : existing.maf_hr;
+
       const settings = {
         ...existing,
-        age: body.age,
-        modifier: body.modifier,
-        units: body.units || 'km',
-        maf_hr: mafHr,
-        start_date: body.start_date || null,
+        ...(body.age !== undefined && { age: body.age }),
+        ...(body.modifier !== undefined && { modifier: body.modifier }),
+        ...(body.units !== undefined && { units: body.units }),
+        ...(mafHr !== undefined && { maf_hr: mafHr }),
+        ...(body.start_date !== undefined && { start_date: body.start_date }),
         ...(body.athlete_name !== undefined && { athlete_name: body.athlete_name }),
+        ...(body.training_start_date !== undefined && { training_start_date: body.training_start_date }),
       };
 
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
@@ -1168,6 +1314,18 @@ export default {
       // Complete first_steps quest if active (v2 only)
       if (env.MAF_GAME) {
         try { await onSettingsSaved(env.MAF_GAME, athleteId); } catch {}
+
+        // If training_start_date is today, mark backfill as complete (no history to process)
+        if (body.training_start_date) {
+          const today = new Date().toISOString().split('T')[0];
+          if (body.training_start_date === today) {
+            try {
+              const gameState = await loadGameState(env.MAF_GAME, athleteId);
+              gameState.backfill_complete = true;
+              await saveGameState(env.MAF_GAME, athleteId, gameState);
+            } catch {}
+          }
+        }
       }
 
       return json({ configured: true, ...settings });

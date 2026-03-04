@@ -12,6 +12,8 @@ interface Settings {
   start_date?: string | null
   training_start_date?: string | null
   athlete_name?: string
+  display_name?: string
+  avatar_url?: string
   // Legacy fields (may still arrive from KV)
   maf_zone_low?: number
   maf_zone_high?: number
@@ -249,9 +251,22 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
         }`}
       >
         <div className="p-6 space-y-6">
-          {/* Header */}
+          {/* Header with avatar */}
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Settings</h2>
+            <div className="flex items-center gap-3">
+              {currentSettings?.avatar_url ? (
+                <img
+                  src={currentSettings.avatar_url}
+                  alt=""
+                  className="w-10 h-10 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm shrink-0">
+                  {(name || '?')[0]?.toUpperCase()}
+                </span>
+              )}
+              <h2 className="text-lg font-semibold text-white">Settings</h2>
+            </div>
             <button
               onClick={() => onClose(null)}
               className="text-gray-400 hover:text-white transition-colors p-2 -mr-2 min-w-[44px] min-h-[44px] flex items-center justify-center"

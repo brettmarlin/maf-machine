@@ -32,6 +32,8 @@ interface Settings {
   maf_zone_high?: number
   qualifying_tolerance?: number
   athlete_name?: string
+  display_name?: string
+  avatar_url?: string
 }
 
 // Activity type icons from Strava sport_type
@@ -331,16 +333,29 @@ export function Dashboard({
             </button>
             <button
               onClick={() => setSidebarOpen(true)}
-              className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-3 pr-2.5 py-1.5 rounded-lg transition-colors"
+              className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-2 pr-2.5 py-1.5 rounded-lg transition-colors"
             >
+              {settings.avatar_url ? (
+                <img
+                  src={settings.avatar_url}
+                  alt=""
+                  className="w-6 h-6 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-[10px] shrink-0">
+                  {(settings.display_name || settings.athlete_name || '?')[0]?.toUpperCase()}
+                </span>
+              )}
               <span className="text-gray-300 text-xs truncate max-w-[80px] sm:max-w-none">
-                {settings.athlete_name?.split(' ')[0] || 'Settings'}
+                {settings.display_name || settings.athlete_name?.split(' ')[0] || 'Settings'}
               </span>
               <span className="text-gray-700">·</span>
-              <span className="text-orange-400 font-medium">{mafHr}</span>
-              <span className="text-gray-600 text-xs hidden sm:inline">bpm · {age} yrs</span>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="text-gray-600 shrink-0 ml-0.5">
-                <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <span className="text-green-500 font-medium">{mafHr}</span>
+              <span className="text-gray-600 text-xs hidden sm:inline">bpm</span>
+              {/* Gear icon */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-gray-500 shrink-0">
+                <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
           </div>
