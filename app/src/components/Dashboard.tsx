@@ -71,6 +71,7 @@ export function Dashboard({
   const [rulesOpen, setRulesOpen] = useState(false)
 
   // Badge celebration state
+  const [activityFilter, setActivityFilter] = useState<string>('All')
   const [celebrationQueue, setCelebrationQueue] = useState<BadgeDefinition[]>([])
   const [showBulkCelebration, setShowBulkCelebration] = useState(false)
   const seenBadgesRef = useRef<Set<string>>(new Set(
@@ -149,6 +150,26 @@ export function Dashboard({
   const filteredSummary = useMemo(
     () => (filteredActivities.length > 0 ? computeSummary(filteredActivities) : null),
     [filteredActivities]
+  )
+
+  const ACTIVITY_FILTERS = ['All', 'Running', 'Walking', 'Swimming', 'Cycling', 'Other'] as const
+
+  function matchesActivityFilter(activity: MAFActivity, filter: string): boolean {
+    if (filter === 'All') return true
+    const t = (activity as any).sport_type || (activity as any).type || ''
+    switch (filter) {
+      case 'Running': return /^(Run|TrailRun|VirtualRun)$/i.test(t)
+      case 'Walking': return /^(Walk|Hike)$/i.test(t)
+      case 'Swimming': return /^Swim$/i.test(t)
+      case 'Cycling': return /^(Ride|VirtualRide|EBikeRide|MountainBikeRide)$/i.test(t)
+      case 'Other': return !(/^(Run|TrailRun|VirtualRun|Walk|Hike|Swim|Ride|VirtualRide|EBikeRide|MountainBikeRide)$/i.test(t))
+      default: return true
+    }
+  }
+
+  const displayActivities = useMemo(
+    () => filteredActivities.filter((a) => matchesActivityFilter(a, activityFilter)),
+    [filteredActivities, activityFilter]
   )
 
   function mergeIntoCache(newActivities: MAFActivity[]) {
@@ -414,6 +435,23 @@ export function Dashboard({
           {/* Run List */}
           {filteredActivities.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+              {/* Activity type filter pills */}
+              <div className="px-4 pt-3 pb-2 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                {ACTIVITY_FILTERS.map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setActivityFilter(f)}
+                    className={`text-xs px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap border ${
+                      activityFilter === f
+                        ? 'bg-white/10 text-white border-white/20'
+                        : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+
               {/* Table Header */}
               <div className="px-4 py-3 border-b border-gray-800">
                 <div className="flex items-center gap-3 text-xs text-gray-500 uppercase tracking-wide">
@@ -421,20 +459,20 @@ export function Dashboard({
                   <span className="w-5 shrink-0 hidden sm:inline"></span>
                   <span className="flex-1">Run</span>
                   <span className="w-14 text-right">HR</span>
-                  <span className="w-10 text-right">Below</span>
+                  <span className="w-10 text-right">In Zone</span>
                   <span className="w-16 text-right">Pace</span>
                   <span className="w-10 text-right hidden sm:inline">EF</span>
                   <span className="w-6 text-center">Q</span>
                   <span className="w-10 text-center hidden sm:inline">Inc.</span>
                 </div>
                 <p className="text-[10px] text-gray-600 mt-1">
-                  {filteredActivities.length} runs{filteredActivities.length !== allActivities.length ? ` of ${allActivities.length} total` : ''}
+                  {displayActivities.length} runs{displayActivities.length !== filteredActivities.length ? ` of ${filteredActivities.length} in range` : ''}
                 </p>
               </div>
 
               {/* Table Body */}
               <div className="divide-y divide-gray-800/50 max-h-96 overflow-y-auto">
-                {filteredActivities.map((a) => (
+                {displayActivities.map((a) => (
                   <div
                     key={a.id}
                     className={`px-4 py-2.5 flex items-center gap-3 text-sm transition-opacity ${
