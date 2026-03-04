@@ -43,16 +43,40 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
     })
   }, [])
 
+  const [progressTotal, setProgressTotal] = useState(0)
+  const [progressCurrent, setProgressCurrent] = useState(0)
+
   useEffect(() => {
+    let polling = true
+    let pollTimer: ReturnType<typeof setTimeout>
+
+    async function pollProgress() {
+      if (!polling) return
+      try {
+        const res = await fetch(`${BASE_PATH}/api/backfill/progress`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.total > 0) {
+            setProgressTotal(data.total)
+            setProgressCurrent(data.current)
+            setProcessingStatus(`Analyzing run ${data.current} of ${data.total}...`)
+          }
+        }
+      } catch {}
+      if (polling) pollTimer = setTimeout(pollProgress, 1500)
+    }
+
     async function runBackfill() {
       try {
-        setProcessingStatus('Analyzing your runs from Strava...')
+        setProcessingStatus('Fetching your activities...')
+
+        // Start polling progress in parallel with backfill
+        pollTimer = setTimeout(pollProgress, 2000)
+
         const res = await fetch(`${BASE_PATH}/api/backfill`, { method: 'POST' })
+        polling = false
         if (!res.ok) throw new Error('Backfill failed')
         const data = await res.json()
-        if (data.backfill?.processed > 0) {
-          setProcessingStatus(`${data.backfill.processed} runs found · Processing...`)
-        }
 
         setBackfill(data.backfill)
         setGame(data.game)
@@ -61,15 +85,20 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
           setPhase('empty')
         } else {
           setPhase('results')
-          // Delay confetti slightly for impact
           setTimeout(fireConfetti, 300)
         }
       } catch {
+        polling = false
         setErrorMsg("Something went wrong analyzing your history. No worries — we'll track from here.")
         setPhase('error')
       }
     }
     runBackfill()
+
+    return () => {
+      polling = false
+      clearTimeout(pollTimer)
+    }
   }, [fireConfetti])
 
   // Processing phase
@@ -81,10 +110,17 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
           <h1 className="text-xl font-bold">Analyzing your history...</h1>
           <div className="space-y-2">
             <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-green-500/70 animate-[indeterminate_1.5s_ease-in-out_infinite]"
-                style={{ width: '60%' }}
-              />
+              {progressTotal > 0 ? (
+                <div
+                  className="h-full rounded-full bg-green-500/70 transition-all duration-500"
+                  style={{ width: `${Math.max(2, (progressCurrent / progressTotal) * 100)}%` }}
+                />
+              ) : (
+                <div
+                  className="h-full rounded-full bg-green-500/70 animate-[indeterminate_1.5s_ease-in-out_infinite]"
+                  style={{ width: '60%' }}
+                />
+              )}
             </div>
             <p className="text-sm text-gray-500">
               {processingStatus}

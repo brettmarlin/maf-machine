@@ -708,6 +708,17 @@ export default {
     }
 
     // --- Backfill: Process cached activities through game engine ---
+    // --- Backfill progress polling ---
+    if (path === '/api/backfill/progress' && request.method === 'GET') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const raw = await env.MAF_GAME.get(`${athleteId}:backfill_progress`);
+      if (!raw) return json({ status: 'idle', total: 0, current: 0 });
+      return json(JSON.parse(raw));
+    }
+
     if (path === '/api/backfill' && request.method === 'POST') {
       const auth = await requireAuth(request, env);
       if (auth instanceof Response) return auth;
@@ -758,6 +769,13 @@ export default {
       let qualifying = 0;
       let totalXP = 0;
 
+      // Store progress for polling
+      await env.MAF_GAME.put(`${athleteId}:backfill_progress`, JSON.stringify({
+        total: toProcess.length,
+        current: 0,
+        status: 'processing',
+      }), { expirationTtl: 300 });
+
       for (const activity of toProcess) {
         // Load stream from cache
         const streamCacheKey = `${athleteId}:stream:${activity.id}`;
@@ -779,7 +797,19 @@ export default {
         processed++;
         if (analysis.qualifying) qualifying++;
         totalXP += result.xp_earned;
+
+        // Update progress every 5 activities (avoid KV write spam)
+        if (processed % 5 === 0 || processed === toProcess.length) {
+          await env.MAF_GAME.put(`${athleteId}:backfill_progress`, JSON.stringify({
+            total: toProcess.length,
+            current: processed,
+            status: 'processing',
+          }), { expirationTtl: 300 });
+        }
       }
+
+      // Clear progress tracker
+      await env.MAF_GAME.delete(`${athleteId}:backfill_progress`);
 
       const finalState = await loadGameState(env.MAF_GAME, athleteId);
       finalState.backfill_complete = true;
