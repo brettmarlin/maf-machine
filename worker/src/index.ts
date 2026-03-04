@@ -1302,7 +1302,40 @@ export default {
       if (!raw) {
         return json({ configured: false });
       }
-      return json({ configured: true, ...JSON.parse(raw) });
+      const settings = JSON.parse(raw);
+
+      // Backfill athlete data from Strava if missing
+      if (!settings.firstname) {
+        try {
+          const token = await getValidToken(athleteId, env);
+          if (token) {
+            const res = await fetch('https://www.strava.com/api/v3/athlete', {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const athlete = await res.json() as {
+                firstname?: string; lastname?: string;
+                profile_medium?: string; profile?: string;
+              };
+              if (athlete.firstname) settings.firstname = athlete.firstname;
+              if (athlete.lastname) settings.lastname = athlete.lastname;
+              const profile = athlete.profile_medium || athlete.profile || '';
+              if (profile) settings.profile = profile;
+              // Also set legacy fields
+              const fullName = [athlete.firstname, athlete.lastname].filter(Boolean).join(' ');
+              if (fullName && !settings.athlete_name) settings.athlete_name = fullName;
+              if (athlete.firstname && !settings.display_name) settings.display_name = athlete.firstname;
+              if (profile && !settings.avatar_url) settings.avatar_url = profile;
+              // Persist so we don't fetch again
+              await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));
+            }
+          }
+        } catch {
+          // Non-critical — continue with what we have
+        }
+      }
+
+      return json({ configured: true, ...settings });
     }
 
     // --- Settings: Save ---
