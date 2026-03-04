@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+/* ─── Brand Color Tokens ─── */
+:root {
+  --color-brand-orange: #ff6900;
+  --color-brand-green: #22c55e;
+  --color-ceiling-green: #22c55e;
+  --color-hr-orange: #ff6900;
+  --color-hr-dot: #E94605;
+  --color-pace-white: #e0e0e0;
+  --color-eff-purple: #a78bfa;
+  --color-strava-orange: #FC4C02;
+  --color-bg-dark: #030712;
+  --color-card-bg: #111827;
+  --color-card-border: #1f2937;
+}
+
 /* Custom animations for onboarding */
 @keyframes pulse-glow {
   0%, 100% {
