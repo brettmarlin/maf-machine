@@ -29,18 +29,15 @@ interface Props {
   datePickerSlot?: ReactNode  // DateRangePicker rendered in toggle bar
 }
 
-// Custom heart shape for HR dots
+// Custom diamond-heart shape for HR dots
 function HeartDot(props: any) {
   const { cx, cy } = props
   if (!cx || !cy) return null
-  const s = 5
+  const s = 1.4
   return (
-    <path
-      d={`M${cx},${cy + s * 0.8} C${cx - s * 0.1},${cy + s * 0.6} ${cx - s},${cy} ${cx - s},${cy - s * 0.35} C${cx - s},${cy - s * 0.85} ${cx - s * 0.5},${cy - s} ${cx},${cy - s * 0.6} C${cx + s * 0.5},${cy - s} ${cx + s},${cy - s * 0.85} ${cx + s},${cy - s * 0.35} C${cx + s},${cy} ${cx + s * 0.1},${cy + s * 0.6} ${cx},${cy + s * 0.8} Z`}
-      fill="#FF6B6B"
-      fillOpacity={0.7}
-      stroke="none"
-    />
+    <svg x={cx - 5} y={cy - 4} width="10" height="8" viewBox="0 0 7 6" fill="none">
+      <path d="M6.36328 1.91406L4.44922 3.82715L4.44336 3.82129L3.17871 5.08594L1.91699 3.82422L1.91406 3.82715L0 1.91406L1.91406 0L3.1748 1.26074L3.17871 1.25781L3.18457 1.26367L4.44922 0L6.36328 1.91406Z" fill="#E94605"/>
+    </svg>
   )
 }
 
@@ -61,7 +58,6 @@ function DiamondDot(props: any) {
 
 export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(['pace']))
-  const [showRolling, setShowRolling] = useState(true)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 500)
 
   useEffect(() => {
@@ -146,9 +142,9 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
         <p className="text-gray-500 text-xs mb-2">{label}</p>
 
         {/* HR */}
-        <p className={aboveCeiling ? 'text-gray-400' : 'text-white'}>
+        <p>
           <span className="text-gray-500">HR:</span>{' '}
-          <span className="font-semibold">{Math.round(data.avgHr)} bpm</span>
+          <span className="font-semibold" style={{ color: aboveCeiling ? '#9ca3af' : '#ff6900' }}>{Math.round(data.avgHr)} bpm</span>
           {aboveCeiling && <span className="text-gray-500 text-xs ml-1">over</span>}
         </p>
 
@@ -189,16 +185,10 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
       {/* Unified toggle-legend row */}
       <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          {/* Ceiling — always shown, not toggleable */}
-          <span className="flex items-center gap-1 text-xs px-2 py-1.5 text-green-500/70">
-            <span className="w-3 h-0 border-t-2 border-dashed border-green-500/60" />
-            <span className="hidden sm:inline">Ceiling</span>
-          </span>
-
           {/* HR — always on, not toggleable */}
           <span className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg bg-white/10 text-white border border-white/20">
-            <svg width="10" height="9" viewBox="0 0 10 9" className="shrink-0">
-              <path d="M5,8 C5,8 0,4.5 0,2.5 C0,0.5 2,0 3,0.5 C3.6,0.8 4.3,1.5 5,2.5 C5.7,1.5 6.4,0.8 7,0.5 C8,0 10,0.5 10,2.5 C10,4.5 5,8 5,8Z" fill="#FF6B6B" />
+            <svg width="7" height="6" viewBox="0 0 7 6" className="shrink-0">
+              <path d="M6.36328 1.91406L4.44922 3.82715L4.44336 3.82129L3.17871 5.08594L1.91699 3.82422L1.91406 3.82715L0 1.91406L1.91406 0L3.1748 1.26074L3.17871 1.25781L3.18457 1.26367L4.44922 0L6.36328 1.91406Z" fill="#ff6900"/>
             </svg>
             HR
           </span>
@@ -206,35 +196,24 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
           {/* Toggleable overlays */}
           {OVERLAY_CONFIG.map((o) => {
             const active = overlays.has(o.key)
+            const isEf = o.key === 'ef'
             return (
               <button
                 key={o.key}
                 onClick={() => toggleOverlay(o.key)}
                 className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg transition-colors border ${
                   active
-                    ? 'bg-white/10 text-white border-white/20'
+                    ? isEf
+                      ? 'bg-purple-500/10 text-purple-300 border-purple-500/20'
+                      : 'bg-white/10 text-white border-white/20'
                     : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
                 }`}
               >
                 {o.key === 'pace' && <span className={`w-2 h-2 rotate-45 ${active ? 'bg-gray-300' : 'bg-gray-700'}`} />}
-                {o.key === 'ef' && <span className={`w-2 h-2 rounded-full ${active ? 'bg-gray-400' : 'bg-gray-700'}`} />}
-                {o.key === 'cadence' && <span className={`w-3 h-0 border-t ${active ? 'border-gray-400 border-dashed' : 'border-gray-700 border-dashed'}`} />}
                 {o.label}
               </button>
             )
           })}
-
-          {/* Rolling avg toggle */}
-          <button
-            onClick={() => setShowRolling(!showRolling)}
-            className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg transition-colors border ${
-              showRolling
-                ? 'bg-white/10 text-white border-white/20'
-                : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
-            }`}
-          >
-            Avg
-          </button>
         </div>
 
         {/* Spacer + date picker at right end */}
@@ -378,18 +357,16 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
               shape={<HeartDot />}
               name="Avg HR"
             />
-            {showRolling && (
-              <Line
-                yAxisId="hr"
-                dataKey="rollingHr"
-                stroke="#FF6B6B"
-                strokeWidth={2}
-                strokeOpacity={0.7}
-                dot={false}
-                connectNulls
-                name="HR avg"
-              />
-            )}
+            <Line
+              yAxisId="hr"
+              dataKey="rollingHr"
+              stroke="#ff6900"
+              strokeWidth={2}
+              strokeOpacity={0.7}
+              dot={false}
+              connectNulls
+              name="HR avg"
+            />
 
             {/* Pace overlay — diamond shapes for data, dashed line for average */}
             {hasPace && (
@@ -400,51 +377,47 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                   shape={<DiamondDot />}
                   name="MAF Pace"
                 />
-                {showRolling && (
-                  <Line
-                    yAxisId="pace"
-                    dataKey="rollingMafPace"
-                    stroke="#E0E0E0"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                    name="Pace avg"
-                    strokeDasharray="4 2"
-                  />
-                )}
+                <Line
+                  yAxisId="pace"
+                  dataKey="rollingMafPace"
+                  stroke="#E0E0E0"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                  name="Pace avg"
+                  strokeDasharray="4 2"
+                />
               </>
             )}
 
             {/* EF overlay — own axis, line only */}
             {hasEf && (
               <>
-                {/* EF scatter dots — small, subtle */}
+                {/* EF scatter dots — light purple */}
                 <Scatter
                   yAxisId="ef"
                   dataKey="ef"
-                  fill="#6b7280"
-                  stroke="#6b7280"
+                  fill="#a78bfa"
+                  stroke="#a78bfa"
                   r={2.5}
                   fillOpacity={0.4}
                   name="EF"
                 />
-                {showRolling && (
-                  <Line
-                    yAxisId="ef"
-                    dataKey="rollingEf"
-                    stroke="#6b7280"
-                    strokeWidth={1.5}
-                    dot={false}
-                    connectNulls
-                    name="EF avg"
-                    strokeDasharray="2 2"
-                  />
-                )}
+                <Line
+                  yAxisId="ef"
+                  dataKey="rollingEf"
+                  stroke="#a78bfa"
+                  strokeWidth={1.5}
+                  dot={false}
+                  connectNulls
+                  name="EF avg"
+                  strokeDasharray="2 2"
+                />
               </>
             )}
 
             {/* Cadence overlay — line only */}
-            {hasCadence && showRolling && (
+            {hasCadence && (
               <Line
                 yAxisId={hasPace ? 'pace' : hasEf ? 'ef' : 'cadence'}
                 dataKey="rollingCadence"

@@ -111,7 +111,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
             </span>
           </div>
           <div>
-            <p className="text-xl sm:text-2xl font-bold" style={{ color: '#FF6B6B' }}>
+            <p className="text-xl sm:text-2xl font-bold" style={{ color: '#ff6900' }}>
               {summary.currentAvgHr !== null ? Math.round(summary.currentAvgHr) : '—'}
               <span className="text-sm font-normal text-gray-500 ml-1">bpm</span>
             </p>
@@ -127,7 +127,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
                 : '—'}
             </p>
           </div>
-          <Sparkline data={hrData} referenceLine={mafHr} color="#FF6B6B" />
+          <Sparkline data={hrData} referenceLine={mafHr} color="#ff6900" />
         </div>
 
         {/* MAF Pace */}
