@@ -37,8 +37,8 @@ function HeartDot(props: any) {
   return (
     <path
       d={`M${cx},${cy + s * 0.8} C${cx - s * 0.1},${cy + s * 0.6} ${cx - s},${cy} ${cx - s},${cy - s * 0.35} C${cx - s},${cy - s * 0.85} ${cx - s * 0.5},${cy - s} ${cx},${cy - s * 0.6} C${cx + s * 0.5},${cy - s} ${cx + s},${cy - s * 0.85} ${cx + s},${cy - s * 0.35} C${cx + s},${cy} ${cx + s * 0.1},${cy + s * 0.6} ${cx},${cy + s * 0.8} Z`}
-      fill="#9ca3af"
-      fillOpacity={0.6}
+      fill="#FF6B6B"
+      fillOpacity={0.7}
       stroke="none"
     />
   )
@@ -52,7 +52,7 @@ function DiamondDot(props: any) {
   return (
     <polygon
       points={`${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`}
-      fill="#f97316"
+      fill="#E0E0E0"
       fillOpacity={0.7}
       stroke="none"
     />
@@ -154,7 +154,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
 
         {/* Pace */}
         {overlays.has('pace') && data.mafPace > 0 && (
-          <p className="text-orange-400 mt-0.5">
+          <p className="text-gray-300 mt-0.5">
             <span className="text-gray-500">Pace:</span>{' '}
             <span className="font-semibold">{formatPace(data.mafPace, units)}</span>
           </p>
@@ -198,7 +198,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
           {/* HR — always on, not toggleable */}
           <span className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg bg-white/10 text-white border border-white/20">
             <svg width="10" height="9" viewBox="0 0 10 9" className="shrink-0">
-              <path d="M5,8 C5,8 0,4.5 0,2.5 C0,0.5 2,0 3,0.5 C3.6,0.8 4.3,1.5 5,2.5 C5.7,1.5 6.4,0.8 7,0.5 C8,0 10,0.5 10,2.5 C10,4.5 5,8 5,8Z" fill="#9ca3af" />
+              <path d="M5,8 C5,8 0,4.5 0,2.5 C0,0.5 2,0 3,0.5 C3.6,0.8 4.3,1.5 5,2.5 C5.7,1.5 6.4,0.8 7,0.5 C8,0 10,0.5 10,2.5 C10,4.5 5,8 5,8Z" fill="#FF6B6B" />
             </svg>
             HR
           </span>
@@ -216,7 +216,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                     : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
                 }`}
               >
-                {o.key === 'pace' && <span className={`w-2 h-2 rotate-45 ${active ? 'bg-orange-500' : 'bg-gray-700'}`} />}
+                {o.key === 'pace' && <span className={`w-2 h-2 rotate-45 ${active ? 'bg-gray-300' : 'bg-gray-700'}`} />}
                 {o.key === 'ef' && <span className={`w-2 h-2 rounded-full ${active ? 'bg-gray-400' : 'bg-gray-700'}`} />}
                 {o.key === 'cadence' && <span className={`w-3 h-0 border-t ${active ? 'border-gray-400 border-dashed' : 'border-gray-700 border-dashed'}`} />}
                 {o.label}
@@ -381,8 +381,9 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
               <Line
                 yAxisId="hr"
                 dataKey="rollingHr"
-                stroke="#9ca3af"
+                stroke="#FF6B6B"
                 strokeWidth={2}
+                strokeOpacity={0.7}
                 dot={false}
                 connectNulls
                 name="HR avg"
@@ -402,7 +403,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                   <Line
                     yAxisId="pace"
                     dataKey="rollingMafPace"
-                    stroke="#f97316"
+                    stroke="#E0E0E0"
                     strokeWidth={2}
                     dot={false}
                     connectNulls

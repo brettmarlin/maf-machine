@@ -15,7 +15,7 @@ type TrendDirection = 'improving' | 'plateau' | 'regressing' | 'insufficient'
 function Sparkline({
   data,
   referenceLine,
-  color = '#f97316',
+  color = '#E0E0E0',
 }: {
   data: { value: number | null }[]
   referenceLine?: number
@@ -111,7 +111,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
             </span>
           </div>
           <div>
-            <p className="text-xl sm:text-2xl font-bold text-orange-400">
+            <p className="text-xl sm:text-2xl font-bold" style={{ color: '#FF6B6B' }}>
               {summary.currentAvgHr !== null ? Math.round(summary.currentAvgHr) : '—'}
               <span className="text-sm font-normal text-gray-500 ml-1">bpm</span>
             </p>
@@ -127,7 +127,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
                 : '—'}
             </p>
           </div>
-          <Sparkline data={hrData} referenceLine={mafHr} />
+          <Sparkline data={hrData} referenceLine={mafHr} color="#FF6B6B" />
         </div>
 
         {/* MAF Pace */}
@@ -142,7 +142,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
             </span>
           </div>
           <div>
-            <p className="text-xl sm:text-2xl font-bold text-orange-400">
+            <p className="text-xl sm:text-2xl font-bold text-gray-200">
               {summary.currentMafPace ? formatPace(summary.currentMafPace, units) : '—'}
               <span className="text-sm font-normal text-gray-500 ml-1">/{units}</span>
             </p>
