@@ -22,7 +22,7 @@ export function OnboardingSetup({ athleteName, onComplete }: Props) {
   const [error, setError] = useState('')
 
   const mafHr = typeof age === 'number' ? 180 - age + modifier : null
-  const firstName = athleteName?.split(' ')[0] || 'there'
+  const firstName = athleteName?.split(' ')[0] || ''
 
   async function handleSubmit() {
     if (typeof age !== 'number' || age < 16 || age > 99) {
@@ -50,7 +50,7 @@ export function OnboardingSetup({ athleteName, onComplete }: Props) {
       <div className="max-w-md w-full space-y-8">
         {/* Welcome */}
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold">Welcome, {firstName}. 👋</h1>
+          <h1 className="text-2xl font-bold">{firstName ? `Welcome, ${firstName} 👋` : 'Welcome 👋'}</h1>
           <p className="text-gray-400 text-sm">
             Let's set up your MAF ceiling. This takes 10 seconds.
           </p>
