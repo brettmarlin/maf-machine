@@ -1182,7 +1182,12 @@ export default {
 
       const cacheKey = `${athleteId}:activities`;
       const cached = await env.MAF_ACTIVITIES.get(cacheKey);
-      let existingActivities: StravaActivity[] = cached ? JSON.parse(cached) : [];
+      const RUN_TYPES = ['Run', 'TrailRun', 'VirtualRun'];
+      let existingActivities: StravaActivity[] = cached
+        ? (JSON.parse(cached) as StravaActivity[]).filter(
+            (a) => RUN_TYPES.includes(a.type) || RUN_TYPES.includes(a.sport_type)
+          )
+        : [];
 
       let after: number | undefined;
       if (existingActivities.length > 0) {
@@ -1214,7 +1219,6 @@ export default {
         }
 
         const batch: StravaActivity[] = await res.json();
-        const RUN_TYPES = ['Run', 'TrailRun', 'VirtualRun'];
         const runs = batch.filter(
           (a) => RUN_TYPES.includes(a.type) || RUN_TYPES.includes(a.sport_type)
         );
