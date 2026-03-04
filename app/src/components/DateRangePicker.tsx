@@ -255,24 +255,26 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
             </button>
             <div className="h-px bg-gray-800 my-1" />
             {trainingStartDate && (
-              <button
-                onClick={() => {
-                  onChange({
-                    start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
-                    end: endOfDay(new Date()),
-                    label: 'Since MAF Start Date',
-                  })
-                  setOpen(false)
-                }}
-                className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                  value.label === 'Since MAF Start Date'
-                    ? 'text-orange-400 bg-gray-800/50'
-                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
-                }`}
-              >
-                Since MAF Start Date
-              </button>
-              <div className="h-px bg-gray-800 my-1" />
+              <>
+                <button
+                  onClick={() => {
+                    onChange({
+                      start: startOfDay(new Date(trainingStartDate + 'T00:00:00')),
+                      end: endOfDay(new Date()),
+                      label: 'Since MAF Start Date',
+                    })
+                    setOpen(false)
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                    value.label === 'Since MAF Start Date'
+                      ? 'text-orange-400 bg-gray-800/50'
+                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                  }`}
+                >
+                  Since MAF Start Date
+                </button>
+                <div className="h-px bg-gray-800 my-1" />
+              </>
             )}
             {PRESETS.map((p) => (
               <button
