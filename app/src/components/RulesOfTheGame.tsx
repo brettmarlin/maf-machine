@@ -1,12 +1,21 @@
-import { LEVEL_TABLE } from '../lib/gameTypes'
+import { LEVEL_TABLE, BADGES } from '../lib/gameTypes'
+
+const LEVEL_EMOJIS = ['🔥', '👟', '🤝', '🕯️', '🏗️', '💚', '📈', '🦁', '🐺', '👑']
+
+const SAMPLE_BADGES = ['committed', 'first_spark', 'took_initiative', 'dialed_in', 'full_week', 'two_week_fire', 'seedling', 'zone_locked']
 
 interface Props {
   open: boolean
   onClose: () => void
+  currentLevel?: number
 }
 
-export function RulesOfTheGame({ open, onClose }: Props) {
+export function RulesOfTheGame({ open, onClose, currentLevel }: Props) {
   if (!open) return null
+
+  const sampleBadgeDefs = SAMPLE_BADGES
+    .map((id) => BADGES.find((b) => b.id === id))
+    .filter(Boolean)
 
   return (
     <div
@@ -43,24 +52,30 @@ export function RulesOfTheGame({ open, onClose }: Props) {
           </div>
 
           {/* Levels */}
-          <Section title="Levels">
+          <Section title="Levels" placeholder="🔥">
             <p className="text-gray-400">
               Every run below your MAF ceiling earns progress toward your next level.
               The more time you spend below your ceiling, the faster you advance.
             </p>
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {LEVEL_TABLE.map((l, i) => (
-                <span
-                  key={l.level}
-                  className={`text-xs px-2 py-1 rounded-md border ${
-                    i === 0
-                      ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
-                      : 'bg-gray-800/60 border-gray-800 text-gray-500'
-                  }`}
-                >
-                  {l.level}. {l.name}
-                </span>
-              ))}
+            <div className="mt-3 space-y-1">
+              {LEVEL_TABLE.map((l, i) => {
+                const isCurrent = currentLevel === l.level
+                return (
+                  <div
+                    key={l.level}
+                    className={`flex items-center gap-2.5 py-1 px-2 rounded-md text-xs ${
+                      isCurrent
+                        ? 'bg-green-500/10 border border-green-500/30'
+                        : ''
+                    }`}
+                  >
+                    <span className="w-5 text-center text-gray-600 font-mono">{l.level}.</span>
+                    <span className="text-base leading-none">{LEVEL_EMOJIS[i] || '⭐'}</span>
+                    <span className={isCurrent ? 'text-green-400 font-medium' : 'text-gray-400'}>{l.name}</span>
+                    {isCurrent && <span className="text-[10px] text-green-500/70 ml-auto">You are here</span>}
+                  </div>
+                )
+              })}
             </div>
             <p className="text-gray-500 text-xs mt-2">
               Early levels come quickly — because showing up IS the achievement.
@@ -69,28 +84,67 @@ export function RulesOfTheGame({ open, onClose }: Props) {
           </Section>
 
           {/* Badges */}
-          <Section title="Badges">
+          <Section title="Badges" placeholder="🏆">
             <p className="text-gray-400">
               Badges mark specific achievements — your first run, your first 20-minute zone lock,
               your first improving MAF Test. They live in your trophy case permanently.
             </p>
+            <div className="flex gap-2 mt-3">
+              {sampleBadgeDefs.map((badge, i) => (
+                <span
+                  key={badge!.id}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-base ${
+                    i < 4
+                      ? 'bg-gray-800/60 border border-green-500/20'
+                      : 'opacity-25 grayscale'
+                  }`}
+                  title={badge!.name}
+                >
+                  {badge!.icon}
+                </span>
+              ))}
+            </div>
             <p className="text-gray-500 text-xs mt-1.5">
               You don't see all the badges upfront. They reveal themselves as you get close to earning them.
-              Some are easy (just show up). Some take months of consistent work.
             </p>
           </Section>
 
           {/* Streaks */}
-          <Section title="Streaks">
+          <Section title="Streaks" placeholder="📅">
             <p className="text-gray-400">
               A streak counts consecutive weeks where you hit your below-ceiling minutes target.
               Your default target is 90 minutes per week — about 3 easy runs.
             </p>
-            <p className="text-gray-400 mt-1.5">
-              Streaks reward the thing that actually builds aerobic fitness: consistency over time.
-              A long streak means your fire is burning strong.
-            </p>
-            <p className="text-gray-500 text-xs mt-1.5">
+            {/* Example streak visualization */}
+            <div className="flex items-end gap-1 mt-3">
+              {[
+                { filled: true, check: true, label: 'W1' },
+                { filled: true, check: true, badge: '🔥', label: 'W2' },
+                { filled: true, check: true, label: 'W3' },
+                { filled: false, partial: 60, label: 'W4' },
+                { filled: false, partial: 0, label: 'W5' },
+              ].map((w, i) => (
+                <div key={i} className="flex flex-col items-center gap-0.5">
+                  {w.badge ? (
+                    <span className="text-[10px]">{w.badge}</span>
+                  ) : (
+                    <span className="text-[10px] invisible">·</span>
+                  )}
+                  <div className={`w-8 h-6 rounded-sm overflow-hidden relative ${
+                    w.filled ? 'bg-green-500/70' : 'bg-gray-800/60 border border-gray-700/50'
+                  }`}>
+                    {w.partial !== undefined && w.partial > 0 && !w.filled && (
+                      <div className="absolute inset-y-0 left-0 bg-green-500/50" style={{ width: `${w.partial}%` }} />
+                    )}
+                    {w.check && (
+                      <span className="absolute inset-0 flex items-center justify-center text-[8px] text-white/60">✓</span>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-gray-600">{w.label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-gray-500 text-xs mt-2">
               Miss your target but still ran? Your streak pauses — it doesn't break.
               Miss a week entirely? It resets. But every streak you build makes you stronger.
             </p>
@@ -102,29 +156,6 @@ export function RulesOfTheGame({ open, onClose }: Props) {
               MAF Machine always shows you one thing: the most important next step.
               It might be "run tomorrow to protect your streak" or "one more run to earn a badge."
               You never have to wonder what to do — just follow the prompt.
-            </p>
-          </Section>
-
-          {/* MAF Test */}
-          <Section title="The MAF Test">
-            <p className="text-gray-400">
-              Run 3–5 miles at your MAF ceiling heart rate on a flat course and record your per-mile pace.
-              Repeat every 4 weeks. Over months, your pace at the same heart rate gets faster —
-              and that's the proof that the method is working.
-            </p>
-          </Section>
-
-          {/* Why it feels slow */}
-          <Section title="Why it feels slow">
-            <p className="text-gray-400">
-              MAF training feels like losing for the first few months. You're running slower than you want.
-              But underneath, your aerobic system is rebuilding itself — capillary density, fat oxidation,
-              cardiac efficiency. These changes are invisible day to day.
-            </p>
-            <p className="text-gray-400 mt-1.5">
-              MAF Machine makes the invisible visible. We show you the cardiac drift improving,
-              the efficiency climbing, the pace trend bending downward.
-              Every run is adding a log to the fire. Trust the process.
             </p>
           </Section>
 
@@ -141,9 +172,14 @@ export function RulesOfTheGame({ open, onClose }: Props) {
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, placeholder }: { title: string; children: React.ReactNode; placeholder?: string }) {
   return (
     <div className="space-y-1.5">
+      {placeholder && (
+        <div className="w-full h-14 rounded-lg border border-gray-800/60 bg-gray-800/20 flex items-center justify-center">
+          <span className="text-2xl">{placeholder}</span>
+        </div>
+      )}
       <h3 className="text-xs text-gray-500 uppercase tracking-wider font-medium">{title}</h3>
       {children}
     </div>

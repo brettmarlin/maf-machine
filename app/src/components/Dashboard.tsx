@@ -363,7 +363,7 @@ export function Dashboard({
       </header>
 
       {/* Rules of the Game modal */}
-      <RulesOfTheGame open={rulesOpen} onClose={() => setRulesOpen(false)} />
+      <RulesOfTheGame open={rulesOpen} onClose={() => setRulesOpen(false)} currentLevel={gameState?.level} />
 
       {/* Content — dims when sidebar is open */}
       <div className={`transition-opacity duration-300 ${sidebarOpen ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
