@@ -223,18 +223,6 @@ export function GameCard({ game: externalGame, loading }: Props) {
           </p>
         </div>
 
-        {/* ─── Next Step ─── */}
-        {game.next_step && (
-          <div className="px-1 space-y-0.5">
-            <p className="text-sm text-white font-medium leading-snug">
-              {game.next_step.message}
-            </p>
-            {game.next_step.detail && (
-              <p className="text-[11px] text-gray-500">{game.next_step.detail}</p>
-            )}
-          </div>
-        )}
-
         {/* ─── Level Progress ─── */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -247,9 +235,17 @@ export function GameCard({ game: externalGame, loading }: Props) {
           </div>
           <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full"
+              className="h-full rounded-full relative overflow-hidden"
               style={{ background: 'linear-gradient(to right, #166534, #22c55e, #4ade80)', width: `${levelAnimated}%`, transition: 'none' }}
-            />
+            >
+              <div
+                className="absolute inset-0 animate-level-stripes"
+                style={{
+                  backgroundImage: 'repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(255,255,255,0.12) 3px, rgba(255,255,255,0.12) 6px)',
+                  backgroundSize: '12px 12px',
+                }}
+              />
+            </div>
           </div>
           {game.next_level_name && (
             <p className="text-[10px] text-gray-600">

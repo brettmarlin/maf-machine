@@ -1,1 +1,27 @@
 @import "tailwindcss";
+
+/* Custom animations for onboarding */
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(252, 76, 2, 0.3));
+  }
+  50% {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 20px rgba(252, 76, 2, 0.5));
+  }
+}
+
+@utility animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
+
+/* Animated diagonal stripes for level progress bar */
+@keyframes level-stripes {
+  0% { background-position: 0 0; }
+  100% { background-position: 12px 0; }
+}
+
+@utility animate-level-stripes {
+  animation: level-stripes 0.8s linear infinite;
+}
