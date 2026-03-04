@@ -33,10 +33,10 @@ interface Props {
 function HeartDot(props: any) {
   const { cx, cy } = props
   if (!cx || !cy) return null
-  const s = 4.5
+  const s = 5
   return (
     <path
-      d={`M${cx},${cy + s * 0.4} C${cx},${cy + s * 0.4} ${cx - s},${cy - s * 0.2} ${cx - s},${cy - s * 0.55} C${cx - s},${cy - s} ${cx},${cy - s} ${cx},${cy - s * 0.55} C${cx},${cy - s} ${cx + s},${cy - s} ${cx + s},${cy - s * 0.55} C${cx + s},${cy - s * 0.2} ${cx},${cy + s * 0.4} ${cx},${cy + s * 0.4}`}
+      d={`M${cx},${cy + s * 0.8} C${cx - s * 0.1},${cy + s * 0.6} ${cx - s},${cy} ${cx - s},${cy - s * 0.35} C${cx - s},${cy - s * 0.85} ${cx - s * 0.5},${cy - s} ${cx},${cy - s * 0.6} C${cx + s * 0.5},${cy - s} ${cx + s},${cy - s * 0.85} ${cx + s},${cy - s * 0.35} C${cx + s},${cy} ${cx + s * 0.1},${cy + s * 0.6} ${cx},${cy + s * 0.8} Z`}
       fill="#9ca3af"
       fillOpacity={0.6}
       stroke="none"
@@ -71,6 +71,23 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   }, [])
 
   const tiers = computeMAFTiers(mafHr)
+
+  // Empty state — no runs yet
+  if (trends.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-gray-400">Trend</h3>
+          {datePickerSlot}
+        </div>
+        <div className="h-48 flex flex-col items-center justify-center text-center space-y-2">
+          <div className="w-full h-px bg-gradient-to-r from-transparent via-green-500/30 to-transparent" />
+          <p className="text-xs text-green-500/60 font-medium">MAF ceiling: {mafHr} bpm</p>
+          <p className="text-xs text-gray-600 mt-2">Your runs will appear here</p>
+        </div>
+      </div>
+    )
+  }
 
   const toggleOverlay = (overlay: Overlay) => {
     const next = new Set(overlays)
