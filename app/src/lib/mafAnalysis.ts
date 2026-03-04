@@ -74,12 +74,12 @@ export interface MAFTrend {
   date: string
   name: string
   // Primary: Heart Rate
-  avgHr: number
+  avgHr: number | null
   rollingHr: number | null
   // Secondary overlays
-  mafPace: number
+  mafPace: number | null
   rollingMafPace: number | null
-  ef: number
+  ef: number | null
   rollingEf: number | null
   cadence: number | null
   rollingCadence: number | null
@@ -470,6 +470,19 @@ export function analyzeActivity(
   }
 }
 
+// ─── Per-Metric Eligibility ──────────────────────────────────────────────────
+
+const CYCLING_TYPES = ['ride', 'virtualride', 'ebike_ride', 'ebikeride', 'mountainbikeride', 'handcycle', 'velomobile']
+
+function isCycling(a: MAFActivity): boolean {
+  return CYCLING_TYPES.includes((a.sport_type ?? '').toLowerCase())
+}
+
+const hasHR = (a: MAFActivity): boolean => a.avg_hr > 0
+const hasPace = (a: MAFActivity): boolean => a.avg_pace > 0 && !isCycling(a)
+const hasEF = (a: MAFActivity): boolean => hasHR(a) && hasPace(a) && a.efficiency_factor > 0
+const hasCadence = (a: MAFActivity): boolean => a.avg_cadence > 0
+
 // ─── Trends & Summary ────────────────────────────────────────────────────────
 
 export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
@@ -487,19 +500,25 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
     const windowStart = Math.max(0, i - windowSize + 1)
     const window = included.slice(windowStart, i + 1)
 
-    const rollingHr = window.length >= 2
-      ? window.reduce((sum, w) => sum + w.avg_hr, 0) / window.length
+    // HR rolling — only activities with HR data
+    const hrWindow = window.filter(hasHR)
+    const rollingHr = hrWindow.length >= 2
+      ? hrWindow.reduce((sum, w) => sum + w.avg_hr, 0) / hrWindow.length
       : null
 
-    const rollingMafPace = window.length >= 2
-      ? window.reduce((sum, w) => sum + w.maf_pace, 0) / window.length
+    // Pace rolling — exclude cycling and zero-pace activities
+    const paceWindow = window.filter(hasPace)
+    const rollingMafPace = paceWindow.length >= 2
+      ? paceWindow.reduce((sum, w) => sum + w.maf_pace, 0) / paceWindow.length
       : null
 
-    const rollingEf = window.length >= 2
-      ? window.reduce((sum, w) => sum + w.efficiency_factor, 0) / window.length
+    // EF rolling — requires both pace and HR, non-cycling
+    const efWindow = window.filter(hasEF)
+    const rollingEf = efWindow.length >= 2
+      ? efWindow.reduce((sum, w) => sum + w.efficiency_factor, 0) / efWindow.length
       : null
 
-    const cadenceWindow = window.filter((w) => w.cadence_in_zone !== null)
+    const cadenceWindow = window.filter((w) => w.cadence_in_zone !== null && hasCadence(w))
     const rollingCadence = cadenceWindow.length >= 2
       ? cadenceWindow.reduce((sum, w) => sum + w.cadence_in_zone!, 0) / cadenceWindow.length
       : null
@@ -512,11 +531,11 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
     return {
       date: a.date,
       name: a.name,
-      avgHr: a.avg_hr,
+      avgHr: hasHR(a) ? a.avg_hr : null,
       rollingHr,
-      mafPace: a.maf_pace,
+      mafPace: hasPace(a) ? a.maf_pace : null,
       rollingMafPace,
-      ef: a.efficiency_factor,
+      ef: hasEF(a) ? a.efficiency_factor : null,
       rollingEf,
       cadence: a.cadence_in_zone,
       rollingCadence,
@@ -561,19 +580,26 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
   const recent = sorted.filter((a) => new Date(a.date).getTime() >= fourWeeksAgo)
   const trendWindow = sorted.filter((a) => new Date(a.date).getTime() >= eightWeeksAgo)
 
-  const currentAvgHr = recent.length > 0
-    ? recent.reduce((sum, a) => sum + a.avg_hr, 0) / recent.length
-    : sorted[sorted.length - 1].avg_hr
+  // Eligibility-filtered sets
+  const recentHR = recent.filter(hasHR)
+  const recentPace = recent.filter(hasPace)
+  const recentEF = recent.filter(hasEF)
+  const trendHR = trendWindow.filter(hasHR)
+  const trendPace = trendWindow.filter(hasPace)
+  const trendEF = trendWindow.filter(hasEF)
+  const zoneActivities = included.filter(hasHR)
 
-  // Pace: already correctly computed per-run, so averaging here is acceptable
-  // (individual run paces are now correct thanks to velocity averaging fix)
-  const currentMafPace = recent.length > 0
-    ? recent.reduce((sum, a) => sum + a.maf_pace, 0) / recent.length
-    : sorted[sorted.length - 1].maf_pace
+  const currentAvgHr = recentHR.length > 0
+    ? recentHR.reduce((sum, a) => sum + a.avg_hr, 0) / recentHR.length
+    : sorted.filter(hasHR).length > 0 ? sorted.filter(hasHR).pop()!.avg_hr : null
 
-  const currentEf = recent.length > 0
-    ? recent.reduce((sum, a) => sum + a.efficiency_factor, 0) / recent.length
-    : sorted[sorted.length - 1].efficiency_factor
+  const currentMafPace = recentPace.length > 0
+    ? recentPace.reduce((sum, a) => sum + a.maf_pace, 0) / recentPace.length
+    : sorted.filter(hasPace).length > 0 ? sorted.filter(hasPace).pop()!.maf_pace : null
+
+  const currentEf = recentEF.length > 0
+    ? recentEF.reduce((sum, a) => sum + a.efficiency_factor, 0) / recentEF.length
+    : sorted.filter(hasEF).length > 0 ? sorted.filter(hasEF).pop()!.efficiency_factor : null
 
   let hrTrendSlope: number | null = null
   let hrTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
@@ -581,39 +607,48 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
   let paceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
   let efTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
 
-  if (trendWindow.length >= 3) {
-    const baseTime = new Date(trendWindow[0].date).getTime()
+  if (trendHR.length >= 3) {
+    const baseTime = new Date(trendHR[0].date).getTime()
     const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
 
-    const hrPoints = trendWindow.map((a) => ({ x: toWeeks(a.date), y: a.avg_hr }))
+    const hrPoints = trendHR.map((a) => ({ x: toWeeks(a.date), y: a.avg_hr }))
     hrTrendSlope = linearSlope(hrPoints)
     if (hrTrendSlope < -0.3) hrTrendDirection = 'improving'
     else if (hrTrendSlope > 0.3) hrTrendDirection = 'regressing'
     else hrTrendDirection = 'plateau'
+  }
 
-    const pacePoints = trendWindow.map((a) => ({ x: toWeeks(a.date), y: a.maf_pace }))
+  if (trendPace.length >= 3) {
+    const baseTime = new Date(trendPace[0].date).getTime()
+    const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
+    const pacePoints = trendPace.map((a) => ({ x: toWeeks(a.date), y: a.maf_pace }))
     paceTrendSlope = linearSlope(pacePoints) * 60
     if (paceTrendSlope < -1) paceTrendDirection = 'improving'
     else if (paceTrendSlope > 1) paceTrendDirection = 'regressing'
     else paceTrendDirection = 'plateau'
+  }
 
-    const efPoints = trendWindow.map((a) => ({ x: toWeeks(a.date), y: a.efficiency_factor }))
+  if (trendEF.length >= 3) {
+    const baseTime = new Date(trendEF[0].date).getTime()
+    const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
+    const efPoints = trendEF.map((a) => ({ x: toWeeks(a.date), y: a.efficiency_factor }))
     const efSlope = linearSlope(efPoints)
     if (efSlope > 0.01) efTrendDirection = 'improving'
     else if (efSlope < -0.01) efTrendDirection = 'regressing'
     else efTrendDirection = 'plateau'
   }
 
-  const zoneDiscipline = included.length > 0
-    ? included.reduce((sum, a) => sum + a.time_below_ceiling_pct, 0) / included.length
+  const zoneDiscipline = zoneActivities.length > 0
+    ? zoneActivities.reduce((sum, a) => sum + a.time_below_ceiling_pct, 0) / zoneActivities.length
     : null
 
   // Zone trend: compare recent 4wk avg to prior 4wk avg
   let zoneTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
-  if (trendWindow.length >= 3) {
-    const baseTime = new Date(trendWindow[0].date).getTime()
+  const trendZone = trendWindow.filter(hasHR)
+  if (trendZone.length >= 3) {
+    const baseTime = new Date(trendZone[0].date).getTime()
     const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
-    const zonePoints = trendWindow.map((a) => ({ x: toWeeks(a.date), y: a.time_below_ceiling_pct }))
+    const zonePoints = trendZone.map((a) => ({ x: toWeeks(a.date), y: a.time_below_ceiling_pct }))
     const zoneSlope = linearSlope(zonePoints)
     if (zoneSlope > 0.5) zoneTrendDirection = 'improving'
     else if (zoneSlope < -0.5) zoneTrendDirection = 'regressing'
@@ -625,14 +660,14 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     ? withDecoupling.reduce((sum, a) => sum + a.aerobic_decoupling!, 0) / withDecoupling.length
     : null
 
-  const withCadence = qualifying.filter((a) => a.cadence_in_zone !== null)
+  const withCadence = qualifying.filter((a) => a.cadence_in_zone !== null && hasCadence(a))
   const avgCadence = withCadence.length > 0
     ? withCadence.reduce((sum, a) => sum + a.cadence_in_zone!, 0) / withCadence.length
     : null
 
   // Cadence trend
   let cadenceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
-  const cadenceTrend = trendWindow.filter((a) => a.cadence_in_zone !== null)
+  const cadenceTrend = trendWindow.filter((a) => a.cadence_in_zone !== null && hasCadence(a))
   if (cadenceTrend.length >= 3) {
     const baseTime = new Date(cadenceTrend[0].date).getTime()
     const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)

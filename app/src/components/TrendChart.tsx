@@ -142,11 +142,13 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
         <p className="text-gray-500 text-xs mb-2">{label}</p>
 
         {/* HR */}
-        <p>
-          <span className="text-gray-500">HR:</span>{' '}
-          <span className="font-semibold" style={{ color: aboveCeiling ? '#9ca3af' : '#ff6900' }}>{Math.round(data.avgHr)} bpm</span>
-          {aboveCeiling && <span className="text-gray-500 text-xs ml-1">over</span>}
-        </p>
+        {data.avgHr != null && (
+          <p>
+            <span className="text-gray-500">HR:</span>{' '}
+            <span className="font-semibold" style={{ color: aboveCeiling ? '#9ca3af' : '#ff6900' }}>{Math.round(data.avgHr)} bpm</span>
+            {aboveCeiling && <span className="text-gray-500 text-xs ml-1">over</span>}
+          </p>
+        )}
 
         {/* Pace */}
         {overlays.has('pace') && data.mafPace > 0 && (
