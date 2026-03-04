@@ -471,17 +471,17 @@ export function analyzeActivity(
 }
 
 // ─── Per-Metric Eligibility ──────────────────────────────────────────────────
+// Pace, EF, Cadence → runs only. HR and Zone → all activity types with HR.
 
-const CYCLING_TYPES = ['ride', 'virtualride', 'ebike_ride', 'ebikeride', 'mountainbikeride', 'handcycle', 'velomobile']
+const RUN_TYPES = ['run', 'trailrun', 'virtualrun']
 
-function isCycling(a: MAFActivity): boolean {
-  return CYCLING_TYPES.includes((a.sport_type ?? '').toLowerCase())
-}
+const isRun = (a: MAFActivity): boolean =>
+  RUN_TYPES.includes((a.sport_type ?? '').toLowerCase())
 
 const hasHR = (a: MAFActivity): boolean => a.avg_hr > 0
-const hasPace = (a: MAFActivity): boolean => a.avg_pace > 0 && !isCycling(a)
-const hasEF = (a: MAFActivity): boolean => hasHR(a) && hasPace(a) && a.efficiency_factor > 0
-const hasCadence = (a: MAFActivity): boolean => a.avg_cadence > 0
+const hasPace = (a: MAFActivity): boolean => isRun(a) && a.avg_pace > 0
+const hasEF = (a: MAFActivity): boolean => isRun(a) && hasHR(a) && a.efficiency_factor > 0
+const hasCadence = (a: MAFActivity): boolean => isRun(a) && a.avg_cadence > 0
 
 // ─── Trends & Summary ────────────────────────────────────────────────────────
 
