@@ -185,7 +185,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none" tabIndex={-1} style={{ outline: 'none' }}>
+    <div className="bg-gray-900 border border-gray-800 rounded-lg px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none [&_*]:outline-none [&_svg]:outline-none [&_svg]:!outline-0" tabIndex={-1} style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}>
       {/* Unified toggle-legend row */}
       <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
@@ -258,13 +258,14 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
               padding={{ right: 20 }}
             />
 
-            {/* Primary Y-axis: Heart Rate */}
+            {/* Primary Y-axis: Heart Rate — hide tick labels on mobile */}
             <YAxis
               yAxisId="hr"
               domain={hrDomain}
-              tick={{ fill: '#6b7280', fontSize: isMobile ? 10 : 11 }}
-              tickLine={{ stroke: '#374151' }}
-              width={leftAxisWidth}
+              tick={isMobile ? false : { fill: '#6b7280', fontSize: 11 }}
+              tickLine={!isMobile}
+              axisLine={!isMobile}
+              width={isMobile ? 2 : leftAxisWidth}
             />
 
             {/* Secondary Y-axis: Pace (right side) — hidden on mobile */}
