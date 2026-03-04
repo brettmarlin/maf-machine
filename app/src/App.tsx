@@ -4,6 +4,7 @@ import { OnboardingSetup } from './components/OnboardingSetup'
 import { BadgeCelebration } from './components/BadgeCelebration'
 import { TrainingStartDate } from './components/TrainingStartDate'
 import { BackfillProgress } from './components/BackfillProgress'
+import { EmailCapture } from './components/EmailCapture'
 import { Dashboard } from './components/Dashboard'
 import { BADGES } from './lib/gameTypes'
 import { BASE_PATH } from './config'
@@ -35,7 +36,7 @@ interface GameSummary {
   badges_earned: string[]
 }
 
-export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'dashboard'
+export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard'
 
 const DEFAULT_SETTINGS: Settings = {
   configured: false,
@@ -159,8 +160,13 @@ export default function App() {
     setForceState('setup_celebration')
   }, [])
 
-  // Callback: celebration dismissed → advance to dashboard
+  // Callback: celebration dismissed → advance to email capture
   const handleCelebrationDone = useCallback(() => {
+    setForceState('email_capture')
+  }, [])
+
+  // Callback: email captured → advance to dashboard
+  const handleEmailComplete = useCallback(() => {
     setForceState('dashboard')
   }, [])
 
@@ -224,6 +230,11 @@ export default function App() {
   // Backfill — start date set in past, backfill not run
   if (appState === 'backfill') {
     return <BackfillProgress onComplete={handleBackfillComplete} mafHr={settings.maf_hr} />
+  }
+
+  // Email capture — after celebration, before dashboard
+  if (appState === 'email_capture') {
+    return <EmailCapture onComplete={handleEmailComplete} />
   }
 
   // Dashboard — fully onboarded

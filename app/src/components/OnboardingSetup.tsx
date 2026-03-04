@@ -17,7 +17,6 @@ export function OnboardingSetup({ athleteName, onComplete }: Props) {
   const [age, setAge] = useState<number | ''>('')
   const [modifier, setModifier] = useState(0)
   const [units, setUnits] = useState<'mi' | 'km'>('mi')
-  const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -35,7 +34,7 @@ export function OnboardingSetup({ athleteName, onComplete }: Props) {
       const res = await fetch(`${BASE_PATH}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ age, modifier, units, ...(email && { email }) }),
+        body: JSON.stringify({ age, modifier, units }),
       })
       if (!res.ok) throw new Error('Failed to save')
       onComplete()
@@ -125,22 +124,6 @@ export function OnboardingSetup({ athleteName, onComplete }: Props) {
             </div>
           </div>
 
-          {/* Email */}
-          <div className="space-y-1.5">
-            <label className="text-xs text-gray-500 uppercase tracking-wider font-medium">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-green-500/50 transition-colors"
-            />
-            <p className="text-[11px] text-gray-600 leading-snug">
-              For account recovery and occasional training tips. Optional.
-            </p>
-          </div>
         </div>
 
         {/* Divider + MAF ceiling display */}
