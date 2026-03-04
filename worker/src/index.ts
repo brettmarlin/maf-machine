@@ -34,6 +34,8 @@ interface StravaTokenResponse {
     id: number;
     firstname: string;
     lastname: string;
+    profile_medium?: string;
+    profile?: string;
   };
 }
 
