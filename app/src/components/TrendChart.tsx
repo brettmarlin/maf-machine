@@ -187,7 +187,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
           {/* HR — always on, not toggleable */}
           <span className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg bg-white/10 text-white border border-white/20">
-            <svg width="7" height="6" viewBox="0 0 7 6" className="shrink-0">
+            <svg width="12" height="12" viewBox="0 0 7 6" className="shrink-0">
               <path d="M6.36328 1.91406L4.44922 3.82715L4.44336 3.82129L3.17871 5.08594L1.91699 3.82422L1.91406 3.82715L0 1.91406L1.91406 0L3.1748 1.26074L3.17871 1.25781L3.18457 1.26367L4.44922 0L6.36328 1.91406Z" fill="#ff6900"/>
             </svg>
             HR
@@ -209,7 +209,7 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                     : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
                 }`}
               >
-                {o.key === 'pace' && <span className={`w-2 h-2 rotate-45 ${active ? 'bg-gray-300' : 'bg-gray-700'}`} />}
+                {o.key === 'pace' && <span className={`rotate-45 ${active ? 'bg-gray-300' : 'bg-gray-700'}`} style={{ width: 8, height: 8 }} />}
                 {o.label}
               </button>
             )
