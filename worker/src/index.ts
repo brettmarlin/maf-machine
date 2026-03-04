@@ -1277,6 +1277,7 @@ export default {
         start_date?: string | null;
         athlete_name?: string;
         training_start_date?: string | null;
+        email?: string;
       };
 
       // Preserve existing settings
@@ -1307,6 +1308,7 @@ export default {
         ...(body.start_date !== undefined && { start_date: body.start_date }),
         ...(body.athlete_name !== undefined && { athlete_name: body.athlete_name }),
         ...(body.training_start_date !== undefined && { training_start_date: body.training_start_date }),
+        ...(body.email !== undefined && { email: body.email }),
       };
 
       await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(settings));

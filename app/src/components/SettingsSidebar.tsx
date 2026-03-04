@@ -42,6 +42,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
   const [modifier, setModifier] = useState<number>(currentSettings?.modifier ?? 0)
   const [units, setUnits] = useState<'km' | 'mi'>(currentSettings?.units ?? 'mi')
   const [startDate, setStartDate] = useState<string>(currentSettings?.training_start_date || currentSettings?.start_date || '')
+  const [email, setEmail] = useState<string>((currentSettings as any)?.email || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -68,6 +69,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           const sd = data.training_start_date || data.start_date || ''
           setStartDate(sd)
           setOriginalStartDate(sd)
+          setEmail(data.email || '')
         }
       })
       .catch(() => {})
@@ -91,6 +93,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
       setModifier(currentSettings.modifier ?? 0)
       setUnits(currentSettings.units ?? 'mi')
       setStartDate(currentSettings.training_start_date || currentSettings.start_date || '')
+      setEmail((currentSettings as any)?.email || '')
     }
   }, [currentSettings])
 
@@ -153,6 +156,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           start_date: startDate || null,
           training_start_date: startDate || null,
           athlete_name: name || undefined,
+          email: email || undefined,
         }),
       })
 
@@ -399,6 +403,18 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
                 Kilometers
               </button>
             </div>
+          </div>
+
+          {/* 7. Email */}
+          <div className="space-y-1.5">
+            <label className="block text-xs text-gray-500 uppercase tracking-wide">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50"
+            />
           </div>
 
           {/* Divider */}
