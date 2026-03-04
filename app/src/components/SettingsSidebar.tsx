@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import confetti from 'canvas-confetti'
 import { BASE_PATH } from '../config'
 import { computeMAFTiers } from '../lib/mafAnalysis'
 
@@ -9,6 +10,7 @@ interface Settings {
   units?: 'km' | 'mi'
   maf_hr?: number
   start_date?: string | null
+  training_start_date?: string | null
   athlete_name?: string
   // Legacy fields (may still arrive from KV)
   maf_zone_low?: number
@@ -29,21 +31,55 @@ interface Props {
   currentSettings?: Settings
   athleteName?: string
   onSync?: () => void
+  devMode?: boolean
 }
 
-export function SettingsSidebar({ open, onClose, currentSettings, athleteName, onSync }: Props) {
+export function SettingsSidebar({ open, onClose, currentSettings, athleteName, onSync, devMode }: Props) {
   const [name, setName] = useState<string>(currentSettings?.athlete_name || athleteName || '')
   const [age, setAge] = useState<number>(currentSettings?.age ?? 35)
   const [modifier, setModifier] = useState<number>(currentSettings?.modifier ?? 0)
   const [units, setUnits] = useState<'km' | 'mi'>(currentSettings?.units ?? 'mi')
-  const [startDate, setStartDate] = useState<string>(currentSettings?.start_date ?? '')
+  const [startDate, setStartDate] = useState<string>(currentSettings?.training_start_date || currentSettings?.start_date || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [pendingStartDate, setPendingStartDate] = useState<string | null>(null)
+  const [originalStartDate, setOriginalStartDate] = useState<string>(currentSettings?.training_start_date || currentSettings?.start_date || '')
+  const [gameProgress, setGameProgress] = useState<{ badges: number; streak: number; runs: number } | null>(null)
   const sidebarRef = useRef<HTMLDivElement>(null)
 
   const mafHr = 180 - age + modifier
   const tiers = computeMAFTiers(mafHr)
+
+  // Re-fetch settings + game state when sidebar opens
+  useEffect(() => {
+    if (!open) return
+    fetch(`${BASE_PATH}/api/settings`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.configured) {
+          setName(data.athlete_name || athleteName || '')
+          setAge(data.age ?? 35)
+          setModifier(data.modifier ?? 0)
+          setUnits(data.units ?? 'mi')
+          const sd = data.training_start_date || data.start_date || ''
+          setStartDate(sd)
+          setOriginalStartDate(sd)
+        }
+      })
+      .catch(() => {})
+    fetch(`${BASE_PATH}/api/game`)
+      .then((r) => r.json())
+      .then((data) => {
+        setGameProgress({
+          badges: (data.badges_earned || []).length,
+          streak: data.streak?.current_weeks ?? 0,
+          runs: data.lifetime_qualifying_runs ?? 0,
+        })
+      })
+      .catch(() => {})
+  }, [open])
 
   // Sync state from props when settings change externally
   useEffect(() => {
@@ -52,7 +88,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
       setAge(currentSettings.age ?? 35)
       setModifier(currentSettings.modifier ?? 0)
       setUnits(currentSettings.units ?? 'mi')
-      setStartDate(currentSettings.start_date ?? '')
+      setStartDate(currentSettings.training_start_date || currentSettings.start_date || '')
     }
   }, [currentSettings])
 
@@ -73,6 +109,33 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
     }
   }, [open])
 
+  function handleStartDateChange(newDate: string) {
+    const hasProgress = gameProgress && (
+      gameProgress.badges > 1 ||
+      gameProgress.streak > 0 ||
+      gameProgress.runs > 0
+    )
+    if (hasProgress && originalStartDate && newDate !== originalStartDate) {
+      setPendingStartDate(newDate)
+      setShowResetConfirm(true)
+    } else {
+      setStartDate(newDate)
+    }
+  }
+
+  function confirmDateReset() {
+    if (pendingStartDate !== null) {
+      setStartDate(pendingStartDate)
+    }
+    setShowResetConfirm(false)
+    setPendingStartDate(null)
+  }
+
+  function cancelDateReset() {
+    setShowResetConfirm(false)
+    setPendingStartDate(null)
+  }
+
   async function handleSave() {
     setSaving(true)
     setError(null)
@@ -86,6 +149,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           modifier,
           units,
           start_date: startDate || null,
+          training_start_date: startDate || null,
           athlete_name: name || undefined,
         }),
       })
@@ -107,6 +171,63 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
   function handleDisconnect() {
     setDisconnecting(true)
     window.location.href = `${BASE_PATH}/api/auth/logout`
+  }
+
+  // ─── Debug handlers ──────────────────────────────────────────────────────────
+
+  const [settingStage, setSettingStage] = useState<string | null>(null)
+
+  async function handleSetStage(stage: string) {
+    setSettingStage(stage)
+    try {
+      await fetch(`${BASE_PATH}/api/debug/set-stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage }),
+      })
+      localStorage.removeItem('maf_seen_badges')
+      window.location.reload()
+    } catch (err) {
+      console.error('Set stage failed:', err)
+      setSettingStage(null)
+    }
+  }
+
+  async function handleRebadge() {
+    setSettingStage('rebadge')
+    try {
+      await fetch(`${BASE_PATH}/api/debug/rebadge`, { method: 'POST' })
+      localStorage.removeItem('maf_seen_badges')
+      window.location.reload()
+    } catch (err) {
+      console.error('Rebadge failed:', err)
+      setSettingStage(null)
+    }
+  }
+
+  async function handleResetOnboarding() {
+    setSettingStage('reset')
+    try {
+      await fetch(`${BASE_PATH}/api/debug/reset-onboarding`, { method: 'DELETE' })
+      localStorage.removeItem('maf_seen_badges')
+      localStorage.removeItem('maf_activities')
+      localStorage.removeItem('maf_excluded')
+      window.location.reload()
+    } catch (err) {
+      console.error('Reset failed:', err)
+      setSettingStage(null)
+    }
+  }
+
+  function handleTestConfetti() {
+    confetti({
+      particleCount: 80,
+      spread: 70,
+      origin: { x: 0.5, y: 0.45 },
+      colors: ['#22c55e', '#4ade80', '#ffffff', '#86efac'],
+      gravity: 0.8,
+      ticks: 150,
+    })
   }
 
   return (
@@ -187,13 +308,10 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           {/* 4. MAF Training Start Date */}
           <div className="space-y-1.5">
             <label className="block text-xs text-gray-500 uppercase tracking-wide">MAF Training Start Date</label>
-            <p className="text-xs text-gray-600 -mt-0.5">
-              Runs before this date are ignored.
-            </p>
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => handleStartDateChange(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50 [color-scheme:dark]"
             />
             {startDate && (
@@ -300,8 +418,83 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
               {disconnecting ? 'Disconnecting...' : 'Disconnect Strava'}
             </button>
           </div>
+
+          {/* Debug Tools — only in dev mode */}
+          {devMode && (
+            <>
+              <div className="border-t border-gray-800" />
+              <div className="space-y-3">
+                <p className="text-xs text-yellow-500/70 uppercase tracking-wide font-semibold">Debug Tools</p>
+
+                {/* Stage buttons */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-gray-600">Jump to stage:</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['new', 'week1', 'week2', 'month1', 'month3', 'veteran'] as const).map((stage) => (
+                      <button
+                        key={stage}
+                        onClick={() => handleSetStage(stage)}
+                        disabled={settingStage !== null}
+                        className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 text-xs py-2 px-2 rounded-lg transition-colors capitalize"
+                      >
+                        {settingStage === stage ? '...' : stage}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="space-y-1.5">
+                  <button
+                    onClick={handleRebadge}
+                    disabled={settingStage !== null}
+                    className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 text-xs py-2 rounded-lg transition-colors"
+                  >
+                    {settingStage === 'rebadge' ? 'Re-badging...' : 'Re-badge'}
+                  </button>
+                  <button
+                    onClick={handleResetOnboarding}
+                    disabled={settingStage !== null}
+                    className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 text-xs py-2 rounded-lg transition-colors"
+                  >
+                    {settingStage === 'reset' ? 'Resetting...' : 'Reset Onboarding'}
+                  </button>
+                  <button
+                    onClick={handleTestConfetti}
+                    className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs py-2 rounded-lg transition-colors"
+                  >
+                    Test Confetti
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
+      {/* Reset confirmation dialog */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm mx-4 space-y-4 shadow-2xl">
+            <p className="text-white text-sm leading-relaxed">
+              Changing your start date will reset your streaks, badges, and level progress. Your Strava data won't be affected. Are you sure?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={cancelDateReset}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2.5 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDateReset}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+              >
+                Reset & Recalculate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
