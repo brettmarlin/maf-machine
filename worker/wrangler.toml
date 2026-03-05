@@ -15,6 +15,7 @@ routes = [
 [assets]
 directory = "../app/dist"
 binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # Production KV namespaces
 [[kv_namespaces]]
