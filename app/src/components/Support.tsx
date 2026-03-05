@@ -101,7 +101,7 @@ export default function Support() {
             />
           </a>
           <span style={{ color: '#333' }}>&middot;</span>
-          <a href="/privacy" style={{ color: '#555', textDecoration: 'none' }}>Privacy Policy</a>
+          <a href="/privacy-policy" style={{ color: '#555', textDecoration: 'none' }}>Privacy Policy</a>
         </div>
       </div>
     </div>

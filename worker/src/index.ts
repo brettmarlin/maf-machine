@@ -1419,7 +1419,7 @@ export default {
     // --- Static Assets / SPA Fallback ---
     try {
       const assetResponse = await env.ASSETS.fetch(request);
-      if (assetResponse.status !== 404) {
+      if (assetResponse.status !== 404 && !(assetResponse.status >= 300 && assetResponse.status < 400)) {
         return assetResponse;
       }
     } catch {

@@ -554,7 +554,7 @@ export function Dashboard({
               />
             </a>
             <div className="flex gap-3 text-[11px] text-gray-600">
-              <a href="/privacy" className="hover:text-gray-400 transition-colors">Privacy Policy</a>
+              <a href="/privacy-policy" className="hover:text-gray-400 transition-colors">Privacy Policy</a>
               <span>·</span>
               <a href="/support" className="hover:text-gray-400 transition-colors">Support</a>
             </div>

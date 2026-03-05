@@ -74,7 +74,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [gameSummary, setGameSummary] = useState<GameSummary | null>(null)
   const [loading, setLoading] = useState(true)
-  const staticPages: Record<string, AppState> = { '/privacy': 'privacy', '/support': 'support' }
+  const staticPages: Record<string, AppState> = { '/privacy-policy': 'privacy', '/privacy': 'privacy', '/support': 'support' }
 
   const [forceState, setForceState] = useState<AppState | null>(
     staticPages[window.location.pathname] ?? null,

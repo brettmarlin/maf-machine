@@ -74,7 +74,7 @@ export function EmailCapture({ onComplete }: Props) {
           </button>
           <p className="text-[11px] text-gray-600">
             By continuing you agree to our{' '}
-            <a href="/privacy" className="underline hover:text-gray-400 transition-colors">Privacy Policy</a>
+            <a href="/privacy-policy" className="underline hover:text-gray-400 transition-colors">Privacy Policy</a>
           </p>
         </div>
       </div>
