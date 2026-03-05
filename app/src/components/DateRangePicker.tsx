@@ -242,7 +242,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 flex overflow-hidden max-w-[calc(100vw-2rem)]">
+        <div className="fixed sm:absolute right-4 sm:right-0 left-4 sm:left-auto top-auto sm:top-full mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 flex overflow-hidden sm:max-w-[calc(100vw-2rem)]">
           {/* Presets column */}
           <div className="w-40 border-r border-gray-800 py-2 shrink-0">
             <button

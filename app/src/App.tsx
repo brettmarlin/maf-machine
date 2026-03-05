@@ -40,7 +40,7 @@ interface GameSummary {
   badges_earned: string[]
 }
 
-export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard'
+export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy'
 
 const DEFAULT_SETTINGS: Settings = {
   configured: false,
@@ -73,7 +73,34 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [gameSummary, setGameSummary] = useState<GameSummary | null>(null)
   const [loading, setLoading] = useState(true)
-  const [forceState, setForceState] = useState<AppState | null>(null)
+  const [forceState, setForceState] = useState<AppState | null>(
+    window.location.pathname === '/privacy' ? 'privacy' : null,
+  )
+
+  // Intercept internal /privacy links for client-side navigation
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      const anchor = (e.target as HTMLElement).closest('a')
+      if (anchor?.getAttribute('href') === '/privacy') {
+        e.preventDefault()
+        window.history.pushState(null, '', '/privacy')
+        setForceState('privacy')
+      }
+    }
+    function handlePopState() {
+      if (window.location.pathname === '/privacy') {
+        setForceState('privacy')
+      } else {
+        setForceState(null)
+      }
+    }
+    document.addEventListener('click', handleClick)
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      document.removeEventListener('click', handleClick)
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [])
 
   async function refreshGameState() {
     try {
@@ -175,7 +202,7 @@ export default function App() {
   }, [])
 
   // Privacy policy — standalone page
-  if (window.location.pathname === '/privacy') {
+  if (forceState === 'privacy') {
     return <PrivacyPolicy />
   }
 
