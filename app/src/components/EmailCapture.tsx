@@ -58,13 +58,25 @@ export function EmailCapture({ onComplete }: Props) {
           )}
         </div>
 
-        <button
-          onClick={handleSubmit}
-          disabled={!valid || saving}
-          className="w-full py-3.5 rounded-lg font-semibold text-base transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-green-500 hover:bg-green-400 text-gray-950"
-        >
-          {saving ? 'Saving...' : 'See your dashboard'}
-        </button>
+        <div className="space-y-3">
+          <button
+            onClick={handleSubmit}
+            disabled={!valid || saving}
+            className="w-full py-3.5 rounded-lg font-semibold text-base transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-green-500 hover:bg-green-400 text-gray-950"
+          >
+            {saving ? 'Saving...' : 'See your dashboard'}
+          </button>
+          <button
+            onClick={onComplete}
+            className="block w-full text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Skip for now →
+          </button>
+          <p className="text-[11px] text-gray-600">
+            By continuing you agree to our{' '}
+            <a href="/privacy" className="underline hover:text-gray-400 transition-colors">Privacy Policy</a>
+          </p>
+        </div>
       </div>
     </div>
   )

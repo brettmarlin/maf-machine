@@ -60,11 +60,7 @@ export function LandingPage() {
               className="h-4 w-auto"
             />
           </a>
-          <div className="flex gap-3 text-[11px] text-gray-600">
-            <a href="/privacy" className="hover:text-gray-400 transition-colors">Privacy Policy</a>
-            <span>·</span>
-            <a href="https://maf.marliin.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">Built by Marliin</a>
-          </div>
+          <a href="/privacy" className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors">Privacy Policy</a>
         </div>
       </div>
     </div>

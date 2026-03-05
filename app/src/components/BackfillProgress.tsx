@@ -104,7 +104,7 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
   // Processing phase
   if (phase === 'processing') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6 relative">
         <div className="max-w-md w-full text-center space-y-6">
           <div className="text-5xl animate-pulse">🔥</div>
           <h1 className="text-xl font-bold">Analyzing your history...</h1>
@@ -126,6 +126,11 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
               {processingStatus}
             </p>
           </div>
+        </div>
+        <div className="absolute bottom-8 left-0 right-0 flex justify-center">
+          <a href="https://www.strava.com" target="_blank" rel="noopener noreferrer">
+            <img src={`${BASE_PATH}/api_logo_pwrdBy_strava_horiz_white.svg`} alt="Powered by Strava" width={130} height={13} className="h-4 w-auto" />
+          </a>
         </div>
         <style>{`
           @keyframes indeterminate {
@@ -248,6 +253,13 @@ export function BackfillProgress({ onComplete, mafHr }: Props) {
         >
           See Your Dashboard
         </button>
+
+        {/* Strava attribution */}
+        <div className="flex justify-center pt-4">
+          <a href="https://www.strava.com" target="_blank" rel="noopener noreferrer">
+            <img src={`${BASE_PATH}/api_logo_pwrdBy_strava_horiz_white.svg`} alt="Powered by Strava" width={130} height={13} className="h-4 w-auto opacity-50" />
+          </a>
+        </div>
       </div>
     </div>
   )

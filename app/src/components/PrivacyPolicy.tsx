@@ -99,8 +99,10 @@ export default function PrivacyPolicy() {
             <li>Your training start date (if set)</li>
           </ul>
           <p>
-            We do not collect your email address, payment information, location beyond what
-            Strava provides in activity data, or any data outside of what is listed above.
+            If you choose to provide your email address during onboarding, we use it only to
+            send product updates. We do not share it with third parties. We do not collect
+            payment information, location beyond what Strava provides in activity data, or any
+            data outside of what is listed above.
           </p>
         </Section>
 

@@ -21,7 +21,7 @@ export function Login() {
             className="h-12 w-auto"
           />
         </a>
-        <div className="pt-8 opacity-60">
+        <div className="pt-8 flex flex-col items-center gap-2">
           <a
             href="https://www.strava.com"
             target="_blank"
@@ -36,6 +36,7 @@ export function Login() {
               className="h-4 w-auto"
             />
           </a>
+          <a href="/privacy" className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors">Privacy Policy</a>
         </div>
       </div>
     </div>
