@@ -3,6 +3,7 @@ import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './li
 import type { GameState } from './lib/gameTypes';
 import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
 import { fetchActivityWeather } from './lib/weatherService';
+import { handleDeauthorization, handleScheduled } from './lib/cleanupDeauthorized';
 import { buildPostRunPayload, buildWeeklySummaryPayload } from './lib/coachingPayload';
 import {
   generatePostRunCoaching, generateWeeklySummary, handleChatMessage,
@@ -391,6 +392,13 @@ export default {
       };
 
       console.log(`[webhook] Received: ${event.aspect_type} ${event.object_type} ${event.object_id} owner=${event.owner_id}`);
+
+      // Handle athlete deauthorization (Strava sends this when user revokes access)
+      if (event.object_type === 'athlete' && event.updates?.authorized === 'false') {
+        const athleteId = String(event.owner_id);
+        await handleDeauthorization(athleteId, env);
+        return json({ ok: true });
+      }
 
       if (event.object_type !== 'activity') {
         return json({ ok: true });
@@ -1163,9 +1171,10 @@ export default {
       if (sessionId) {
         await env.MAF_TOKENS.delete(`session:${sessionId}`);
       }
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(null, {
+        status: 302,
         headers: {
-          'Content-Type': 'application/json',
+          Location: '/',
           'Set-Cookie': 'maf_session=; Path=/; HttpOnly; Max-Age=0',
         },
       });
@@ -1425,5 +1434,9 @@ export default {
     } catch {
       return new Response('Not Found', { status: 404 });
     }
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+    await handleScheduled(event, env);
   },
 };

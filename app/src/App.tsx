@@ -6,6 +6,7 @@ import { TrainingStartDate } from './components/TrainingStartDate'
 import { BackfillProgress } from './components/BackfillProgress'
 import { EmailCapture } from './components/EmailCapture'
 import { Dashboard } from './components/Dashboard'
+import PrivacyPolicy from './components/PrivacyPolicy'
 import { BADGES } from './lib/gameTypes'
 import { BASE_PATH } from './config'
 
@@ -172,6 +173,11 @@ export default function App() {
   const handleEmailComplete = useCallback(() => {
     setForceState('dashboard')
   }, [])
+
+  // Privacy policy — standalone page
+  if (window.location.pathname === '/privacy') {
+    return <PrivacyPolicy />
+  }
 
   if (loading) {
     return (

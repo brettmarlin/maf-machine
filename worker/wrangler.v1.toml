@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 workers_dev = false
 
+[triggers]
+crons = ["0 3 * * *"]
+
 routes = [
   { pattern = "maf-v1.marliin.com/*", zone_name = "marliin.com" }
 ]

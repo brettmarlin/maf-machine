@@ -22,9 +22,16 @@ export function LandingPage() {
         {/* Strava connect button */}
         <a
           href={`${BASE_PATH}/api/auth/strava`}
-          className="inline-flex items-center justify-center gap-2 bg-[#FC4C02] hover:bg-[#e04400] text-white font-semibold text-base px-8 py-3 rounded-lg transition-colors"
+          className="inline-block hover:opacity-90 transition-opacity"
+          aria-label="Connect with Strava"
         >
-          Connect with Strava
+          <img
+            src={`${BASE_PATH}/btn_strava_connectwith_orange.svg`}
+            alt="Connect with Strava"
+            width={193}
+            height={48}
+            className="h-12 w-auto"
+          />
         </a>
 
         {/* Already connected link */}
@@ -38,7 +45,7 @@ export function LandingPage() {
         </p>
 
         {/* Powered by Strava */}
-        <div className="pt-4 opacity-50">
+        <div className="pt-4 flex flex-col items-center gap-2 opacity-50">
           <a
             href="https://www.strava.com"
             target="_blank"
@@ -53,6 +60,11 @@ export function LandingPage() {
               className="h-4 w-auto"
             />
           </a>
+          <div className="flex gap-3 text-[11px] text-gray-600">
+            <a href="/privacy" className="hover:text-gray-400 transition-colors">Privacy Policy</a>
+            <span>·</span>
+            <a href="https://maf.marliin.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">Built by Marliin</a>
+          </div>
         </div>
       </div>
     </div>

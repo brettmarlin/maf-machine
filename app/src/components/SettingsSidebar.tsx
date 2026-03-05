@@ -185,7 +185,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
     window.location.href = `${BASE_PATH}/api/auth/logout`
   }
 
-  // ─── Debug handlers ──────────────────────────────────────────────────────────
+  // ─── Debug handlers (dev builds only) ────────────────────────────────────────
 
   const [settingStage, setSettingStage] = useState<string | null>(null)
 
@@ -456,8 +456,8 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
             </button>
           </div>
 
-          {/* Debug Tools — only in dev mode */}
-          {devMode && (
+          {/* Debug Tools — only in local dev builds */}
+          {import.meta.env.DEV && devMode && (
             <>
               <div className="border-t border-gray-800" />
               <div className="space-y-3">
