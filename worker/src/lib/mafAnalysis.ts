@@ -11,6 +11,7 @@ export interface UserSettings {
   units: 'km' | 'mi';
   maf_hr: number;            // 180 - age + modifier = CEILING
   start_date: string | null;
+  training_start_date?: string | null;
 }
 
 export interface MAFTiers {

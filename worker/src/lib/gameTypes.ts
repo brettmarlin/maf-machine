@@ -334,6 +334,9 @@ export interface GameState {
   // Training start date
   training_start_date: string | null;
 
+  // Onboarding
+  backfill_complete: boolean;
+
   // Metadata
   updated_at: string;
 }
@@ -370,6 +373,7 @@ export function createInitialGameState(): GameState {
     lifetime_qualifying_runs: 0,
     lifetime_total_runs: 0,
     training_start_date: null,
+    backfill_complete: false,
     updated_at: new Date().toISOString(),
   };
 }

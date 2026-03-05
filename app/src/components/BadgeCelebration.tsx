@@ -5,9 +5,11 @@ import type { BadgeDefinition } from '../lib/gameTypes'
 interface Props {
   badge: BadgeDefinition
   onDismiss: () => void
+  level?: { level: number; name: string; progress: number; nextName?: string }
+  autoDismiss?: boolean  // default true
 }
 
-export function BadgeCelebration({ badge, onDismiss }: Props) {
+export function BadgeCelebration({ badge, onDismiss, level, autoDismiss = true }: Props) {
   const fireConfetti = useCallback(() => {
     confetti({
       particleCount: 60,
@@ -21,9 +23,11 @@ export function BadgeCelebration({ badge, onDismiss }: Props) {
 
   useEffect(() => {
     fireConfetti()
-    const timer = setTimeout(onDismiss, 3000)
-    return () => clearTimeout(timer)
-  }, [fireConfetti, onDismiss])
+    if (autoDismiss) {
+      const timer = setTimeout(onDismiss, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [fireConfetti, onDismiss, autoDismiss])
 
   return (
     <div
@@ -37,6 +41,25 @@ export function BadgeCelebration({ badge, onDismiss }: Props) {
         <span className="text-6xl block">{badge.icon}</span>
         <h3 className="text-white font-bold text-lg">{badge.name}</h3>
         <p className="text-sm text-gray-400 leading-relaxed">{badge.message}</p>
+        {level && (
+          <div className="pt-2 space-y-1.5">
+            <p className="text-xs text-green-400 font-semibold">
+              Level {level.level} · {level.name}
+            </p>
+            <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  background: 'linear-gradient(to right, #166534, #22c55e, #4ade80)',
+                  width: `${level.progress}%`,
+                }}
+              />
+            </div>
+            {level.nextName && (
+              <p className="text-[10px] text-gray-600">→ {level.nextName}</p>
+            )}
+          </div>
+        )}
         <button
           onClick={onDismiss}
           className="text-xs text-gray-600 hover:text-gray-400 transition-colors pt-1"

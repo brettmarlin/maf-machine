@@ -33,7 +33,6 @@ interface Props {
 function HeartDot(props: any) {
   const { cx, cy } = props
   if (!cx || !cy) return null
-  const s = 1.4
   return (
     <svg x={cx - 5} y={cy - 4} width="10" height="8" viewBox="0 0 7 6" fill="none">
       <path d="M6.36328 1.91406L4.44922 3.82715L4.44336 3.82129L3.17871 5.08594L1.91699 3.82422L1.91406 3.82715L0 1.91406L1.91406 0L3.1748 1.26074L3.17871 1.25781L3.18457 1.26367L4.44922 0L6.36328 1.91406Z" fill="#E94605"/>
@@ -108,13 +107,13 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
     timeInZonePct: t.timeInZonePct,
   }))
 
-  const allHr = chartData.map((d) => d.avgHr).filter(Boolean)
+  const allHr = chartData.map((d) => d.avgHr).filter((v): v is number => v != null && v > 0)
   const minHr = Math.min(...allHr, tiers.easy_low - 5)
   const maxHr = Math.max(...allHr, tiers.ceiling + 10)
   const hrDomain: [number, number] = [Math.floor(minHr / 5) * 5, Math.ceil(maxHr / 5) * 5]
 
   // Compute EF domain for dedicated axis
-  const allEf = chartData.map((d) => d.ef).filter((v) => v > 0)
+  const allEf = chartData.map((d) => d.ef).filter((v): v is number => v != null && v > 0)
   const efMin = allEf.length > 0 ? Math.floor((Math.min(...allEf) - 0.02) * 100) / 100 : 0.5
   const efMax = allEf.length > 0 ? Math.ceil((Math.max(...allEf) + 0.02) * 100) / 100 : 1.5
   const efDomain: [number, number] = [efMin, efMax]

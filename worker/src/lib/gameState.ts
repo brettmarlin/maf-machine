@@ -85,6 +85,9 @@ export interface GameAPIResponse {
   total_qualifying_runs: number;
   lifetime_total_runs: number;
 
+  // Onboarding
+  backfill_complete: boolean;
+
   // v1 compat (GameCard.tsx still uses these until Step 7)
   xp_total: number;
   xp_to_next_level: number;
@@ -325,7 +328,19 @@ export async function onSettingsSaved(
  * Determine the single most important next action for the runner.
  * Priority: streak protection > badge within reach > level progress > weekly target > encouragement
  */
-export function buildNextStep(state: GameState): NextStep {
+export function buildNextStep(state: GameState, settings?: { maf_hr?: number }): NextStep {
+  // Priority 0: First run — brand new runner
+  if (state.lifetime_total_runs === 0) {
+    const ceiling = settings?.maf_hr;
+    return {
+      priority: 'encouragement',
+      message: ceiling
+        ? `Go for your first MAF run. Keep your heart rate under ${ceiling} bpm.`
+        : 'Go for your first MAF run.',
+      detail: 'Walk if you need to — that counts.',
+    };
+  }
+
   const now = new Date();
   const currentWeek = getISOWeek(now);
   const currentWeekRecord = state.weekly_history.find((w) => w.week === currentWeek);
@@ -470,7 +485,7 @@ function getNextAchievableBadge(state: GameState): { message: string; detail: st
 
 // ─── API Response Builder ────────────────────────────────────────────────────
 
-export function buildGameAPIResponse(state: GameState): GameAPIResponse {
+export function buildGameAPIResponse(state: GameState, settings?: { maf_hr?: number }): GameAPIResponse {
   const level = getLevelFromXP(state.xp_total);
   const xpToNext = getXPToNextLevel(state.xp_total);
   const levelPct = getLevelProgressPct(state.xp_total);
@@ -490,7 +505,7 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
   const badgesRecent = (state.badges_earned || []).slice(-3);
 
   // Next step
-  const nextStep = buildNextStep(state);
+  const nextStep = buildNextStep(state, settings);
 
   return {
     // v2 fields
@@ -516,6 +531,7 @@ export function buildGameAPIResponse(state: GameState): GameAPIResponse {
     total_zone_minutes: state.total_zone_minutes || state.lifetime_zone_minutes || 0,
     total_qualifying_runs: state.total_qualifying_runs || state.lifetime_qualifying_runs || 0,
     lifetime_total_runs: state.lifetime_total_runs || 0,
+    backfill_complete: state.backfill_complete ?? true,  // default true for existing users
 
     // v1 compat
     xp_total: state.xp_total,

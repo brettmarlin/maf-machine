@@ -136,7 +136,6 @@ export function Dashboard({
 
   const units = settings.units || 'mi'
   const mafHr = settings.maf_hr || 145
-  const age = settings.age ?? 35
 
   const filteredActivities = useMemo(
     () => allActivities.filter((a) => {
