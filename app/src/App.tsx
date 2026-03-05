@@ -7,6 +7,7 @@ import { BackfillProgress } from './components/BackfillProgress'
 import { EmailCapture } from './components/EmailCapture'
 import { Dashboard } from './components/Dashboard'
 import PrivacyPolicy from './components/PrivacyPolicy'
+import Support from './components/Support'
 import { BADGES } from './lib/gameTypes'
 import { BASE_PATH } from './config'
 
@@ -40,7 +41,7 @@ interface GameSummary {
   badges_earned: string[]
 }
 
-export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy'
+export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
 
 const DEFAULT_SETTINGS: Settings = {
   configured: false,
@@ -73,26 +74,25 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [gameSummary, setGameSummary] = useState<GameSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const staticPages: Record<string, AppState> = { '/privacy': 'privacy', '/support': 'support' }
+
   const [forceState, setForceState] = useState<AppState | null>(
-    window.location.pathname === '/privacy' ? 'privacy' : null,
+    staticPages[window.location.pathname] ?? null,
   )
 
-  // Intercept internal /privacy links for client-side navigation
+  // Intercept internal static page links for client-side navigation
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       const anchor = (e.target as HTMLElement).closest('a')
-      if (anchor?.getAttribute('href') === '/privacy') {
+      const href = anchor?.getAttribute('href')
+      if (href && staticPages[href]) {
         e.preventDefault()
-        window.history.pushState(null, '', '/privacy')
-        setForceState('privacy')
+        window.history.pushState(null, '', href)
+        setForceState(staticPages[href])
       }
     }
     function handlePopState() {
-      if (window.location.pathname === '/privacy') {
-        setForceState('privacy')
-      } else {
-        setForceState(null)
-      }
+      setForceState(staticPages[window.location.pathname] ?? null)
     }
     document.addEventListener('click', handleClick)
     window.addEventListener('popstate', handlePopState)
@@ -201,10 +201,9 @@ export default function App() {
     setForceState('dashboard')
   }, [])
 
-  // Privacy policy — standalone page
-  if (forceState === 'privacy') {
-    return <PrivacyPolicy />
-  }
+  // Static pages
+  if (forceState === 'privacy') return <PrivacyPolicy />
+  if (forceState === 'support') return <Support />
 
   if (loading) {
     return (
