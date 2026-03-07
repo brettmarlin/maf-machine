@@ -10,6 +10,7 @@ interface Props {
   value: DateRange
   onChange: (range: DateRange) => void
   trainingStartDate?: string | null
+  compact?: boolean
 }
 
 const PRESETS: { label: string; days: number }[] = [
@@ -139,7 +140,17 @@ function CalendarMonth({
   )
 }
 
-export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
+const COMPACT_LABELS: Record<string, string> = {
+  'Since MAF Start Date': 'Since Start',
+  'Last 3 months': '3 mo',
+  'Last 6 months': '6 mo',
+  'Last year': '1 yr',
+  'Last 7 days': '7d',
+  'Last 28 days': '28d',
+  'All time': 'All',
+}
+
+export function DateRangePicker({ value, onChange, trainingStartDate, compact }: Props) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'presets' | 'custom'>('presets')
   const [customStart, setCustomStart] = useState<Date>(value.start)
@@ -230,30 +241,48 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
       {/* Trigger — compact, mobile-safe */}
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+        style={{
+          background: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+          borderRadius: '9999px',
+          padding: '6px 14px',
+          color: '#d1d5dc',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          cursor: 'pointer',
+        }}
       >
-        <span className="text-gray-300">
-          {value.label}
-        </span>
-        <svg className="w-3 h-3 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        {compact ? (COMPACT_LABELS[value.label] || value.label) : value.label} <span style={{ opacity: 0.6 }}>↓</span>
       </button>
 
       {/* Dropdown */}
       {open && (
-        <div className="fixed sm:absolute right-4 sm:right-0 left-4 sm:left-auto top-auto sm:top-full mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 flex overflow-hidden sm:max-w-[calc(100vw-2rem)]">
+        <div className="fixed sm:absolute right-4 sm:right-0 left-4 sm:left-auto top-auto sm:top-full mt-1 shadow-2xl z-50 flex overflow-hidden sm:max-w-[calc(100vw-2rem)]" style={{
+            background: 'rgba(15, 15, 19, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '12px',
+          }}>
           {/* Presets column */}
-          <div className="w-40 border-r border-gray-800 py-2 shrink-0">
+          <div className="w-40 border-r border-white/8 py-2 shrink-0">
             <button
               onClick={() => setMode('custom')}
               className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                mode === 'custom' ? 'text-orange-400 bg-gray-800/50' : 'text-gray-400 hover:bg-gray-800/50'
+                mode === 'custom' ? 'bg-white/5' : 'text-gray-400 hover:bg-white/5 hover:text-white'
               }`}
+              style={mode === 'custom' ? {
+                background: 'linear-gradient(135deg, #F84590, #EF6D11)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              } : undefined}
             >
               Custom
             </button>
-            <div className="h-px bg-gray-800 my-1" />
+            <div className="h-px bg-white/8 my-1" />
             {trainingStartDate && (
               <>
                 <button
@@ -267,13 +296,18 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
                   }}
                   className={`w-full text-left px-3 py-2 text-xs transition-colors ${
                     value.label === 'Since MAF Start Date'
-                      ? 'text-orange-400 bg-gray-800/50'
-                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                      ? 'bg-white/5'
+                      : 'text-gray-400 hover:bg-white/5 hover:text-white'
                   }`}
+                  style={value.label === 'Since MAF Start Date' ? {
+                    background: 'linear-gradient(135deg, #F84590, #EF6D11)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  } : undefined}
                 >
                   Since MAF Start Date
                 </button>
-                <div className="h-px bg-gray-800 my-1" />
+                <div className="h-px bg-white/8 my-1" />
               </>
             )}
             {PRESETS.map((p) => (
@@ -282,9 +316,14 @@ export function DateRangePicker({ value, onChange, trainingStartDate }: Props) {
                 onClick={() => selectPreset(p)}
                 className={`w-full text-left px-3 py-2 text-xs transition-colors ${
                   value.label === p.label
-                    ? 'text-orange-400 bg-gray-800/50'
-                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                    ? 'bg-white/5'
+                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
                 }`}
+                style={value.label === p.label ? {
+                  background: 'linear-gradient(135deg, #F84590, #EF6D11)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                } : undefined}
               >
                 {p.label}
               </button>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ResponsiveContainer, LineChart, Line, ReferenceLine } from 'recharts'
+import { ResponsiveContainer, LineChart, Line, ReferenceLine, YAxis } from 'recharts'
 import type { MAFSummary, MAFTrend } from '../lib/mafAnalysis'
 import { formatPace, formatEF } from '../lib/mafAnalysis'
 
@@ -16,29 +16,68 @@ function Sparkline({
   data,
   referenceLine,
   color = '#E0E0E0',
+  useGradient = false,
+  dashed = false,
+  reversed = false,
 }: {
   data: { value: number | null }[]
   referenceLine?: number
   color?: string
+  useGradient?: boolean
+  dashed?: boolean
+  reversed?: boolean
 }) {
   const filtered = data.filter((d) => d.value !== null && d.value > 0)
   if (filtered.length < 2) return <div className="h-10" />
 
+  const strokeColor = useGradient ? 'url(#sparkGradient)' : color
+
   return (
-    <ResponsiveContainer width="100%" height={40}>
-      <LineChart data={filtered} margin={{ top: 4, right: 2, bottom: 4, left: 2 }}>
-        {referenceLine !== undefined && (
-          <ReferenceLine y={referenceLine} stroke={color} strokeDasharray="3 3" strokeWidth={1} strokeOpacity={0.3} />
-        )}
-        <Line
-          dataKey="value"
-          stroke={color}
-          strokeWidth={1.5}
-          dot={false}
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="relative">
+      {useGradient && (
+        <svg width="0" height="0" style={{ position: 'absolute' }}>
+          <defs>
+            <linearGradient id="sparkGradient" x1="0" y1="0" x2="500" y2="0" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#F84590" />
+              <stop offset="50%" stopColor="#EF6D11" />
+              <stop offset="100%" stopColor="#F84590" />
+              <animateTransform
+                attributeName="gradientTransform"
+                type="translate"
+                from="-500 0"
+                to="500 0"
+                dur="3s"
+                repeatCount="indefinite"
+              />
+            </linearGradient>
+          </defs>
+        </svg>
+      )}
+      <ResponsiveContainer width="100%" height={40}>
+        <LineChart data={filtered} margin={{ top: 4, right: 2, bottom: 4, left: 2 }}>
+          <YAxis
+            hide
+            reversed={reversed}
+            domain={([min, max]: [number, number]) => {
+              const padding = (max - min) * 0.2
+              return [min - padding, max + padding]
+            }}
+          />
+          {referenceLine !== undefined && (
+            <ReferenceLine y={referenceLine} stroke={color} strokeDasharray="3 3" strokeWidth={1} strokeOpacity={0.3} />
+          )}
+          <Line
+            dataKey="value"
+            stroke={strokeColor}
+            strokeWidth={1.5}
+            strokeDasharray={dashed ? '4 4' : undefined}
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -53,8 +92,8 @@ function trendLabel(direction: TrendDirection, metric: string): string {
 }
 
 function trendColor(direction: TrendDirection): string {
-  if (direction === 'improving') return 'text-green-400'
-  if (direction === 'regressing') return 'text-red-400'
+  if (direction === 'improving') return 'text-maf-improving'
+  if (direction === 'regressing') return 'text-maf-declining'
   return 'text-gray-500'
 }
 
@@ -81,7 +120,7 @@ function InfoTooltip({ text }: { text: string }) {
         ⓘ
       </button>
       {show && (
-        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 p-2 text-xs text-gray-300 bg-gray-800 border border-gray-700 rounded-lg shadow-lg pointer-events-none">
+        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 p-2 text-xs text-gray-300 bg-maf-dark border border-maf-subtle rounded-lg shadow-lg pointer-events-none">
           {text}
         </span>
       )}
@@ -90,8 +129,8 @@ function InfoTooltip({ text }: { text: string }) {
 }
 
 export function SummaryCards({ summary, trends, units, mafHr }: Props) {
-  const hrData = trends.map((t) => ({ value: t.rollingHr ?? t.avgHr }))
-  const paceData = trends.map((t) => ({ value: t.rollingMafPace ?? t.mafPace }))
+  const hrData = trends.map((t) => ({ value: t.avgHr }))
+  const paceData = trends.map((t) => ({ value: t.mafPace }))
 
   const hrDeviation = summary.currentAvgHr !== null ? summary.currentAvgHr - mafHr : null
 
@@ -100,23 +139,30 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
       {/* Primary: HR + MAF Pace — two equal cards with sparklines */}
       <div className="grid grid-cols-2 gap-3">
         {/* Heart Rate */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 sm:p-4 space-y-2">
+        <div className="glass-card rounded-xl p-3 sm:p-4 space-y-2">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
-              Heart Rate
-              <InfoTooltip text="Average heart rate across qualifying runs. Lower means your aerobic system is handling the work with less effort." />
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
+              Avg HR
+              <InfoTooltip text="Overall average heart rate across all runs (matches Strava). Lower means your aerobic system is handling the work with less effort." />
             </p>
             <span className={`text-[10px] sm:text-xs ${trendColor(summary.hrTrendDirection)}`}>
               {trendArrow(summary.hrTrendDirection, 'hr')} {trendLabel(summary.hrTrendDirection, 'hr')}
             </span>
           </div>
           <div>
-            <p className="text-xl sm:text-2xl font-bold" style={{ color: '#ff6900' }}>
-              {summary.currentAvgHr !== null ? Math.round(summary.currentAvgHr) : '—'}
+            <p className="text-xl sm:text-2xl font-bold">
+              <span style={{
+                background: 'linear-gradient(135deg, #F84590, #EF6D11)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                fontWeight: 700,
+              }}>
+                {summary.currentAvgHr !== null ? Math.round(summary.currentAvgHr) : '—'}
+              </span>
               <span className="text-sm font-normal text-gray-500 ml-1">bpm</span>
             </p>
             <p className={`text-xs mt-0.5 ${
-              hrDeviation !== null && hrDeviation <= 0 ? 'text-green-400/70' : 'text-gray-500'
+              hrDeviation !== null && hrDeviation <= 0 ? 'text-maf-below-ceiling/70' : 'text-gray-500'
             }`}>
               {hrDeviation !== null
                 ? hrDeviation > 0
@@ -127,15 +173,15 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
                 : '—'}
             </p>
           </div>
-          <Sparkline data={hrData} referenceLine={mafHr} color="#ff6900" />
+          <Sparkline data={hrData} referenceLine={mafHr} color="#ff6900" useGradient />
         </div>
 
         {/* MAF Pace */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 sm:p-4 space-y-2">
+        <div className="glass-card rounded-xl p-3 sm:p-4 space-y-2">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
               MAF Pace
-              <InfoTooltip text="Average pace while heart rate is below your ceiling. The key metric — this should get faster over months of training." />
+              <InfoTooltip text="Pace while heart rate is below your ceiling — not your overall pace. The key metric that should get faster over months of MAF training." />
             </p>
             <span className={`text-[10px] sm:text-xs ${trendColor(summary.paceTrendDirection)}`}>
               {trendArrow(summary.paceTrendDirection, 'pace')} {trendLabel(summary.paceTrendDirection, 'pace')}
@@ -152,16 +198,17 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
               </p>
             )}
           </div>
-          <Sparkline data={paceData} />
+          <Sparkline data={paceData} dashed reversed />
+          
         </div>
       </div>
 
       {/* Secondary: Cadence, Time in Zone, Efficiency — compact full-width cards */}
       <div className="grid grid-cols-3 gap-2">
         {/* Cadence */}
-        <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
+        <div className="glass-card rounded-xl p-3">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
               Cadence
               <InfoTooltip text="Steps per minute while running (walking excluded). Target 170+ for lighter, more efficient steps." />
             </p>
@@ -176,9 +223,9 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
         </div>
 
         {/* Time in Zone */}
-        <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
+        <div className="glass-card rounded-xl p-3">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
               Time in Zone
               <InfoTooltip text="Percentage of run time at or below your MAF ceiling. Higher is better — aim for 80%+ as your discipline improves." />
             </p>
@@ -193,9 +240,9 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
         </div>
 
         {/* Efficiency */}
-        <div className="bg-gray-900/60 border border-gray-800/60 rounded-lg p-3">
+        <div className="glass-card rounded-xl p-3">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
               Efficiency
               <InfoTooltip text="Efficiency Factor: meters per minute divided by heart rate. Higher means more distance per heartbeat." />
             </p>

@@ -37,9 +37,12 @@ interface Props {
   athleteName?: string
   onSync?: () => void
   devMode?: boolean
+  debugWeekPct?: number | null
+  onDebugWeekPctChange?: (val: number | null) => void
+  liveWeekPct?: number
 }
 
-export function SettingsSidebar({ open, onClose, currentSettings, athleteName, onSync, devMode }: Props) {
+export function SettingsSidebar({ open, onClose, currentSettings, athleteName, onSync, devMode, debugWeekPct, onDebugWeekPctChange, liveWeekPct = 0 }: Props) {
   const [name, setName] = useState<string>(
     currentSettings?.athlete_name || athleteName ||
     [currentSettings?.firstname, currentSettings?.lastname].filter(Boolean).join(' ') || ''
@@ -256,7 +259,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
       <div
         ref={sidebarRef}
         tabIndex={-1}
-        className={`fixed top-0 right-0 z-50 h-full w-full max-w-sm bg-gray-900 border-l border-gray-800 shadow-2xl transform transition-transform duration-300 ease-out overflow-y-auto outline-none ${
+        className={`fixed top-0 right-0 z-50 h-full w-full max-w-sm glass-card !rounded-none !border-l !border-t-0 !border-b-0 !border-r-0 border-maf-subtle shadow-2xl transform transition-transform duration-300 ease-out overflow-y-auto outline-none ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
@@ -290,37 +293,37 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
 
           {/* 1. Name (from Strava profile, editable) */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">Name</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
               maxLength={50}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50"
+              className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-maf-orange/50 focus:border-maf-orange/50"
             />
           </div>
 
           {/* 2. Age */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">Age</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Age</label>
             <input
               type="number"
               min={10}
               max={100}
               value={age}
               onChange={(e) => setAge(parseInt(e.target.value) || 0)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50"
+              className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-maf-orange/50 focus:border-maf-orange/50"
             />
           </div>
 
           {/* 3. Training Status */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">Training Status</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Training Status</label>
             <select
               value={modifier}
               onChange={(e) => setModifier(parseInt(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50"
+              className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-maf-orange/50 focus:border-maf-orange/50"
             >
               {MODIFIERS.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -332,12 +335,12 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
 
           {/* 4. MAF Training Start Date */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">MAF Training Start Date</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">MAF Training Start Date</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => handleStartDateChange(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50 [color-scheme:dark]"
+              className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-maf-orange/50 focus:border-maf-orange/50 [color-scheme:dark]"
             />
             {startDate && (
               <button
@@ -351,10 +354,10 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           </div>
 
           {/* 5. MAF Ceiling Display */}
-          <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-4 space-y-3">
+          <div className="bg-maf-glass border border-maf-subtle rounded-xl p-4 space-y-3">
             <div className="text-center space-y-1">
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Your MAF Ceiling</p>
-              <p className="text-3xl font-bold text-orange-500">{mafHr} <span className="text-lg font-normal">bpm</span></p>
+              <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Your MAF Ceiling</p>
+              <p className="text-3xl font-bold text-maf-orange">{mafHr} <span className="text-lg font-normal">bpm</span></p>
               <p className="text-xs text-gray-600">Do not exceed — everything below is good</p>
             </div>
             <div className="space-y-2 text-xs">
@@ -384,15 +387,15 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
 
           {/* 6. Units */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">Units</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Units</label>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setUnits('mi')}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                   units === 'mi'
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-600'
+                    ? 'bg-maf-strava text-white'
+                    : 'bg-maf-input text-gray-400 border border-maf-subtle hover:border-maf-medium'
                 }`}
               >
                 Miles
@@ -400,10 +403,10 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
               <button
                 type="button"
                 onClick={() => setUnits('km')}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                   units === 'km'
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-600'
+                    ? 'bg-maf-strava text-white'
+                    : 'bg-maf-input text-gray-400 border border-maf-subtle hover:border-maf-medium'
                 }`}
               >
                 Kilometers
@@ -413,23 +416,23 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
 
           {/* 7. Email */}
           <div className="space-y-1.5">
-            <label className="block text-xs text-gray-500 uppercase tracking-wide">Email</label>
+            <label className="block text-xs text-gray-500/70 font-semibold uppercase tracking-widest">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50"
+              className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-maf-orange/50 focus:border-maf-orange/50"
             />
           </div>
 
           {/* Divider */}
-          <div className="border-t border-gray-800" />
+          <div className="border-t border-maf-subtle" />
 
           {/* Sync button */}
           <button
             onClick={() => { if (onSync) onSync(); handleSave() }}
-            className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-2.5 rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
+            className="w-full bg-maf-glass hover:bg-maf-glass-hover text-gray-300 font-medium py-2.5 rounded-xl transition-colors text-sm flex items-center justify-center gap-2 border border-maf-subtle"
           >
             <span>↻</span> Sync with Strava
           </button>
@@ -438,7 +441,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           <button
             onClick={handleSave}
             disabled={saving}
-            className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+            className="w-full bg-maf-strava hover:bg-maf-strava-hover disabled:opacity-50 text-white font-semibold py-3 rounded-full transition-colors text-sm"
           >
             {saving ? 'Saving...' : 'Save & Close'}
           </button>
@@ -459,7 +462,7 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
           {/* Debug Tools — only in local dev builds */}
           {import.meta.env.DEV && devMode && (
             <>
-              <div className="border-t border-gray-800" />
+              <div className="border-t border-maf-subtle" />
               <div className="space-y-3">
                 <p className="text-xs text-yellow-500/70 uppercase tracking-wide font-semibold">Debug Tools</p>
 
@@ -503,6 +506,30 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
                     Test Confetti
                   </button>
                 </div>
+
+                {/* Streak week progress override */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-gray-600">Week progress override:</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min={0} max={100} step={1}
+                      value={debugWeekPct ?? Math.round(liveWeekPct * 100)}
+                      onChange={e => onDebugWeekPctChange?.(Number(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="text-xs text-gray-400 w-10 text-right">
+                      {debugWeekPct ?? 'live'}%
+                    </span>
+                  </div>
+                  {debugWeekPct != null && (
+                    <button
+                      onClick={() => onDebugWeekPctChange?.(null)}
+                      className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs py-1.5 rounded-lg transition-colors"
+                    >
+                      Reset to live
+                    </button>
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -511,20 +538,20 @@ export function SettingsSidebar({ open, onClose, currentSettings, athleteName, o
       {/* Reset confirmation dialog */}
       {showResetConfirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm mx-4 space-y-4 shadow-2xl">
+          <div className="bg-maf-dark border border-maf-subtle rounded-xl p-6 max-w-sm mx-4 space-y-4 shadow-2xl">
             <p className="text-white text-sm leading-relaxed">
               Changing your start date will reset your streaks, badges, and level progress. Your Strava data won't be affected. Are you sure?
             </p>
             <div className="flex gap-3">
               <button
                 onClick={cancelDateReset}
-                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2.5 rounded-lg transition-colors"
+                className="flex-1 bg-maf-glass hover:bg-maf-glass-hover text-gray-300 text-sm py-2.5 rounded-xl transition-colors border border-maf-subtle"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDateReset}
-                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                className="flex-1 bg-maf-strava hover:bg-maf-strava-hover text-white text-sm font-medium py-2.5 rounded-xl transition-colors"
               >
                 Reset & Recalculate
               </button>

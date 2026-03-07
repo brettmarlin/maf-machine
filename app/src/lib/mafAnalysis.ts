@@ -47,7 +47,8 @@ export interface MAFActivity {
   time_easy_pct: number              // % in easy tier
   time_recovery_pct: number          // % in recovery tier
 
-  // Pace metrics
+  // In-zone metrics (below ceiling only)
+  hr_in_zone: number | null          // avg HR while below ceiling
   maf_pace: number                   // avg pace while below ceiling
   cardiac_drift: number | null
   aerobic_decoupling: number | null
@@ -75,6 +76,7 @@ export interface MAFTrend {
   name: string
   // Primary: Heart Rate
   avgHr: number | null
+  hrInZone: number | null           // avg HR while below ceiling
   rollingHr: number | null
   // Secondary overlays
   mafPace: number | null
@@ -319,6 +321,7 @@ export function analyzeActivity(
     controlled_pct: 0, easy_pct: 0, recovery_pct: 0,
   }
   let mafPace = avgPace
+  let hrInZone: number | null = null
   let cardiacDrift: number | null = null
   let aerobicDecoupling: number | null = null
   let cadenceInZone: number | null = null
@@ -347,9 +350,13 @@ export function analyzeActivity(
     let belowCeilingVelocityCount = 0
     let belowCeilingCadenceSum = 0
     let belowCeilingCadenceCount = 0
+    let belowCeilingHrSum = 0
+    let belowCeilingHrCount = 0
 
     for (let i = 0; i < len; i++) {
       if (hr[i] <= tiers.ceiling) {
+        belowCeilingHrSum += hr[i]
+        belowCeilingHrCount++
         if (velocity[i] > MIN_VELOCITY) {
           belowCeilingVelocitySum += velocity[i]
           belowCeilingVelocityCount++
@@ -362,6 +369,8 @@ export function analyzeActivity(
       }
     }
 
+    // Average HR while below ceiling
+    hrInZone = belowCeilingHrCount > 0 ? belowCeilingHrSum / belowCeilingHrCount : null
     // Convert average velocity to pace (correct way)
     mafPace = belowCeilingVelocityCount > 0
       ? velocityToPace(belowCeilingVelocitySum / belowCeilingVelocityCount, units)
@@ -446,7 +455,8 @@ export function analyzeActivity(
     time_easy_pct: tierBreakdown.easy_pct,
     time_recovery_pct: tierBreakdown.recovery_pct,
 
-    // Pace
+    // In-zone metrics
+    hr_in_zone: hrInZone,
     maf_pace: mafPace,
     cardiac_drift: cardiacDrift,
     aerobic_decoupling: aerobicDecoupling,
@@ -532,6 +542,7 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
       date: a.date,
       name: a.name,
       avgHr: hasHR(a) ? a.avg_hr : null,
+      hrInZone: a.hr_in_zone,
       rollingHr,
       mafPace: hasPace(a) ? a.maf_pace : null,
       rollingMafPace,

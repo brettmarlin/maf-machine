@@ -72,6 +72,14 @@ export function Dashboard({
   const [gameState, setGameState] = useState<any>(null)
   const [coachLoading, setCoachLoading] = useState(true)
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [debugWeekPct, setDebugWeekPct] = useState<number | null>(null)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640)
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   // Badge celebration state
   const [celebrationQueue, setCelebrationQueue] = useState<BadgeDefinition[]>([])
@@ -224,6 +232,17 @@ export function Dashboard({
       }
 
       mergeIntoCache([...alreadyCached, ...analyzed])
+
+      // One-time debug: print HR and pace field comparison for latest activity
+      if (import.meta.env.DEV && analyzed.length > 0) {
+        const latest = analyzed[analyzed.length - 1]
+        console.log(
+          `[MAF Field Audit] ${latest.name}\n` +
+          `  HR: avg=${Math.round(latest.avg_hr)} / below_ceiling=${latest.hr_in_zone != null ? Math.round(latest.hr_in_zone) : 'n/a'}\n` +
+          `  Pace: avg=${formatPace(latest.avg_pace, units)} / maf=${formatPace(latest.maf_pace, units)}`
+        )
+      }
+
       setSyncStatus(
         toAnalyze.length > 0
           ? `Synced ${toAnalyze.length} new + ${alreadyCached.length} cached runs`
@@ -305,7 +324,7 @@ export function Dashboard({
   }, [dateRange])
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen text-white">
       {/* Settings Sidebar */}
       <SettingsSidebar
         open={sidebarOpen}
@@ -314,16 +333,21 @@ export function Dashboard({
         athleteName={settings.athlete_name}
         onSync={() => syncActivities(dateRange)}
         devMode={gameState?.dev_mode === true}
+        debugWeekPct={debugWeekPct}
+        onDebugWeekPctChange={setDebugWeekPct}
+        liveWeekPct={gameState ? Math.min(1, (gameState.weekly?.zone_minutes || 0) / (gameState.weekly?.target || 1)) : 0}
       />
 
       {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-30">
+      <header className="border-b border-maf-subtle bg-maf-dark/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          {/* Left: Logo + wordmark */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xl leading-none" aria-hidden>🔥</span>
-            <h1 className="text-lg font-bold">MAF Machine</h1>
-          </div>
+          {/* Left: Logo */}
+          <img
+            src={`${BASE_PATH}/maf-machine-logo.svg`}
+            alt="MAF Machine"
+            className="shrink-0"
+            style={{ height: 20, width: 'auto' }}
+          />
 
           {/* Right: How it works + settings block */}
           <div className="flex items-center gap-2">
@@ -335,7 +359,7 @@ export function Dashboard({
             </button>
             <button
               onClick={() => setSidebarOpen(true)}
-              className="flex items-center gap-2 text-sm bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 pl-2 pr-2.5 py-1.5 rounded-lg transition-colors"
+              className="flex items-center gap-2 text-sm glass-card hover:bg-maf-glass-hover pl-2 pr-2.5 py-1.5 rounded-full transition-colors"
             >
               {(settings.profile || settings.avatar_url) ? (
                 <img
@@ -352,7 +376,7 @@ export function Dashboard({
                 {settings.firstname || settings.display_name || settings.athlete_name?.split(' ')[0] || 'Settings'}
               </span>
               <span className="text-gray-700">·</span>
-              <span className="text-green-500 font-medium">{mafHr}</span>
+              <span className="text-maf-below-ceiling font-medium">{mafHr}</span>
               <span className="text-gray-600 text-xs hidden sm:inline">bpm</span>
               {/* Gear icon */}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-gray-500 shrink-0">
@@ -372,13 +396,13 @@ export function Dashboard({
         <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
           {/* Sync Status */}
           {syncing && (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-sm text-gray-400">
+            <div className="glass-card rounded-xl p-3 text-sm text-gray-400">
               {syncStatus}
             </div>
           )}
 
           {error && (
-            <div className="bg-red-900/30 border border-red-800 rounded-lg p-3 text-sm text-red-400">
+            <div className="bg-maf-red/10 border border-maf-red/30 rounded-xl p-3 text-sm text-red-400">
               {error}
             </div>
           )}
@@ -387,6 +411,7 @@ export function Dashboard({
           <GameCard
             game={gameState}
             loading={coachLoading}
+            debugWeekPct={debugWeekPct}
           />
 
           {/* Trend Chart — date picker integrated into toggle bar */}
@@ -399,6 +424,7 @@ export function Dashboard({
                 value={dateRange}
                 onChange={setDateRange}
                 trainingStartDate={settings.training_start_date || settings.start_date}
+                compact={isMobile}
               />
             }
           />
@@ -415,10 +441,10 @@ export function Dashboard({
 
           {/* Run List */}
           {filteredActivities.length > 0 && (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            <div className="glass-card rounded-xl overflow-hidden">
               {/* Table Header */}
-              <div className="px-4 py-3 border-b border-gray-800">
-                <div className="flex items-center gap-3 text-xs text-gray-500 uppercase tracking-wide">
+              <div className="px-4 py-3 border-b border-maf-subtle">
+                <div className="flex items-center gap-3 text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
                   <span className="w-16 shrink-0">Date</span>
                   <span className="w-5 shrink-0 hidden sm:inline"></span>
                   <span className="flex-1">Run</span>
@@ -435,7 +461,7 @@ export function Dashboard({
               </div>
 
               {/* Table Body */}
-              <div className="divide-y divide-gray-800/50 max-h-96 overflow-y-auto">
+              <div className="divide-y divide-maf-subtle max-h-96 overflow-y-auto">
                 {filteredActivities.map((a) => (
                   <div
                     key={a.id}
@@ -497,7 +523,7 @@ export function Dashboard({
                     {/* Qualifying */}
                     <span className="w-6 text-center">
                       {a.qualifying ? (
-                        <span className="text-orange-400 text-xs">✓</span>
+                        <span className="text-maf-orange text-xs">✓</span>
                       ) : (
                         <span className="text-gray-700 text-xs">·</span>
                       )}
@@ -509,7 +535,7 @@ export function Dashboard({
                       className={`w-10 hidden sm:flex items-center justify-center transition-colors ${
                         a.excluded
                           ? 'text-gray-600 hover:text-gray-400'
-                          : 'text-orange-400/60 hover:text-orange-400'
+                          : 'text-maf-orange/60 hover:text-maf-orange'
                       }`}
                       title={a.excluded ? 'Click to include this run in analysis' : 'Click to exclude this run from analysis'}
                     >
@@ -530,7 +556,7 @@ export function Dashboard({
             </div>
           )}
           {filteredActivities.length === 0 && allActivities.length === 0 && (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+            <div className="glass-card rounded-xl p-6 text-center">
               <p className="text-sm text-gray-500">
                 Your first run will show up after syncing with Strava
               </p>
@@ -538,7 +564,7 @@ export function Dashboard({
           )}
 
           {/* Footer */}
-          <footer className="border-t border-gray-800 py-4 mt-8 flex flex-col items-center gap-2">
+          <footer className="border-t border-maf-subtle py-4 mt-8 flex flex-col items-center gap-2">
             <a
               href="https://www.strava.com"
               target="_blank"
@@ -566,7 +592,7 @@ export function Dashboard({
               <p className="text-gray-400 text-lg">No runs yet</p>
               <p className="text-gray-500 text-sm">
                 Click the menu to sync your activities from Strava, or{' '}
-                <button onClick={() => setSidebarOpen(true)} className="text-orange-400 hover:underline">
+                <button onClick={() => setSidebarOpen(true)} className="text-maf-orange hover:underline">
                   configure your MAF settings
                 </button>{' '}
                 first.

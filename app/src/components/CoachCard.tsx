@@ -60,10 +60,10 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
 
   if (loading) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 animate-pulse">
-        <div className="h-3 bg-gray-800 rounded w-48 mb-3" />
-        <div className="h-3 bg-gray-800 rounded w-full mb-2" />
-        <div className="h-3 bg-gray-800 rounded w-3/4" />
+      <div className="glass-card rounded-xl p-4 animate-pulse">
+        <div className="h-3 bg-maf-glass rounded w-48 mb-3" />
+        <div className="h-3 bg-maf-glass rounded w-full mb-2" />
+        <div className="h-3 bg-maf-glass rounded w-3/4" />
       </div>
     )
   }
@@ -73,7 +73,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
   // Pro gate — show teaser when coaching is disabled
   if (!coachingEnabled) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+      <div className="glass-card rounded-xl p-4 space-y-3">
         {coaching && (
           <p className="text-xs text-gray-400 font-medium">
             {coaching.run_name || 'Latest run'}
@@ -89,7 +89,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
           <p className="text-xs text-gray-400 leading-relaxed max-w-xs mx-auto">
             Get personalized insights for every run, powered by an AI coach that learns your patterns and gets smarter over time.
           </p>
-          <button className="mt-2 text-xs font-medium text-gray-950 bg-green-500 hover:bg-green-400 px-4 py-1.5 rounded-lg transition-colors">
+          <button className="mt-2 text-xs font-medium text-gray-950 bg-maf-green hover:bg-maf-green/80 px-4 py-1.5 rounded-full transition-colors">
             Upgrade to Pro
           </button>
         </div>
@@ -99,7 +99,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
 
   if (!coaching) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+      <div className="glass-card rounded-xl p-4 text-center">
         <p className="text-gray-500 text-sm">
           Complete a qualifying run to get your first coaching assessment.
         </p>
@@ -120,7 +120,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
     : ''
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+    <div className="glass-card rounded-xl p-4 space-y-3">
       {/* Header: run name + date | Strava link */}
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-400 font-medium">
@@ -147,11 +147,11 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
           {coaching.badges_earned.map((badge) => (
             <div
               key={badge.id}
-              className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-2"
+              className="flex items-start gap-2 bg-maf-orange/10 border border-maf-orange/20 rounded-xl px-3 py-2"
             >
               <span className="text-lg shrink-0">{badge.icon}</span>
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-orange-400">{badge.name}</p>
+                <p className="text-xs font-semibold text-maf-orange">{badge.name}</p>
                 <p className="text-[11px] text-gray-400 leading-snug">{badge.message}</p>
               </div>
             </div>
@@ -194,7 +194,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
           )}
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-xs text-orange-400/70 hover:text-orange-400 transition-colors"
+            className="text-xs text-maf-orange/70 hover:text-maf-orange transition-colors"
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
@@ -202,7 +202,7 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
       )}
 
       {/* Runner notes */}
-      <div className="pt-1 border-t border-gray-800/50 space-y-1.5">
+      <div className="pt-1 border-t border-maf-subtle space-y-1.5">
         <textarea
           value={note}
           onChange={(e) => { setNote(e.target.value); setNoteSaved(false) }}
@@ -210,14 +210,14 @@ export function CoachCard({ coaching, game, loading, coachingEnabled = false }: 
           placeholder="How did this run feel? (conditions, fatigue, notes...)"
           rows={2}
           maxLength={500}
-          className="w-full bg-gray-800/50 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 placeholder-gray-600 resize-none focus:outline-none focus:border-gray-700"
+          className="w-full bg-maf-input border border-maf-subtle rounded-xl px-3 py-2 text-xs text-gray-300 placeholder-gray-600 resize-none focus:outline-none focus:border-maf-medium"
         />
         {!noteSaved && (
           <div className="flex justify-end">
             <button
               onClick={saveNote}
               disabled={saving}
-              className="text-[10px] text-orange-400/70 hover:text-orange-400 transition-colors"
+              className="text-[10px] text-maf-orange/70 hover:text-maf-orange transition-colors"
             >
               {saving ? 'Saving...' : 'Save note'}
             </button>
