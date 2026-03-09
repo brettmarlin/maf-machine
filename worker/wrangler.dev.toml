@@ -16,19 +16,19 @@ not_found_handling = "single-page-application"
 
 [[kv_namespaces]]
 binding = "MAF_TOKENS"
-id = "7fb555c0c26842ec8c43966c7bd4998a"
+id = "eadad87860a24db297e36d810cccfa94"
 
 [[kv_namespaces]]
 binding = "MAF_ACTIVITIES"
-id = "fba9b72e54e74bd492c3c75902c5749b"
+id = "6b88824b06b548899d517d70739faa23"
 
 [[kv_namespaces]]
 binding = "MAF_SETTINGS"
-id = "08b7ce8af969418595856f61fb42c6c6"
+id = "d0d1c96a7b834c0490728d705f57c533"
 
 [[kv_namespaces]]
 binding = "MAF_GAME"
-id = "da4c031c54784e1d878b087294a76421"
+id = "ad1c22de0f0e40df909bc311bd2c1b19"
 
 [vars]
 DEV_MODE = "true"

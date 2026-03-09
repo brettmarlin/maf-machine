@@ -1171,11 +1171,12 @@ export default {
       if (sessionId) {
         await env.MAF_TOKENS.delete(`session:${sessionId}`);
       }
+      const origin = new URL(request.url).origin;
       return new Response(null, {
         status: 302,
         headers: {
-          Location: '/',
-          'Set-Cookie': 'maf_session=; Path=/; HttpOnly; Max-Age=0',
+          Location: origin,
+          'Set-Cookie': 'maf_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
         },
       });
     }
