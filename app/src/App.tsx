@@ -39,6 +39,7 @@ interface GameSummary {
   level_progress_pct: number
   next_level_name: string | null
   badges_earned: string[]
+  lifetime_total_runs: number
 }
 
 export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
@@ -55,12 +56,15 @@ function getAppState(
   gameSummary: GameSummary | null,
 ): AppState {
   if (!authenticated) return 'landing'
-  if (!settings?.age) return 'setup'
 
-  // Step 8 bypass: existing users who have settings.age → treat as onboarded
-  // If they lack training_start_date, they'll see a subtle prompt in the dashboard,
-  // NOT a full-screen gate. The start_date screen is only shown during fresh onboarding
-  // (via forceState after setup celebration).
+  // Only show onboarding for truly new users: no settings AND no prior activity
+  const isNewUser = !settings?.age
+    && (gameSummary?.lifetime_total_runs ?? 0) === 0
+    && !gameSummary?.badges_earned?.includes('committed')
+  if (isNewUser) return 'setup'
+
+  // Returning user who reconnected but lost settings → skip straight to dashboard
+  // (dashboard/settings will prompt them to re-enter age if needed)
   const backfillDone = gameSummary?.backfill_complete ?? true
   if (!backfillDone && settings?.training_start_date) return 'backfill'
 
@@ -114,6 +118,7 @@ export default function App() {
           level_progress_pct: data.level_progress_pct ?? 0,
           next_level_name: data.next_level_name ?? null,
           badges_earned: data.badges_earned || [],
+          lifetime_total_runs: data.lifetime_total_runs ?? 0,
         })
         return data
       }
@@ -155,6 +160,7 @@ export default function App() {
               level_progress_pct: gameData.level_progress_pct ?? 0,
               next_level_name: gameData.next_level_name ?? null,
               badges_earned: gameData.badges_earned || [],
+              lifetime_total_runs: gameData.lifetime_total_runs ?? 0,
             })
           }
         }
