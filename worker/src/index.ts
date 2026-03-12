@@ -1308,38 +1308,55 @@ export default {
           'Content-Type': 'application/json',
         };
 
-        // Discover the database's title property name
+        // Discover title property + ensure custom properties exist
         const dbRes = await fetch(`https://api.notion.com/v1/databases/${env.NOTION_FEEDBACK_DB_ID}`, {
           method: 'GET',
           headers: notionHeaders,
         });
         if (!dbRes.ok) {
-          const dbErr = await dbRes.text();
-          console.error('Notion DB read error:', dbErr);
+          console.error('Notion DB read error:', await dbRes.text());
           return json({ error: 'Failed to submit' }, 500);
         }
         const dbData = await dbRes.json() as { properties: Record<string, { type: string }> };
         const titleProp = Object.entries(dbData.properties).find(([, v]) => v.type === 'title');
         const titleKey = titleProp ? titleProp[0] : 'Name';
 
-        // Create page in Notion with title + body content
+        // Add missing properties to the database (idempotent — skips if they exist)
+        const needsProps: Record<string, unknown> = {};
+        if (!dbData.properties['Category']) needsProps['Category'] = { select: { options: [
+          { name: 'Bug', color: 'red' }, { name: 'Feature Request', color: 'blue' },
+          { name: 'Confusion', color: 'yellow' }, { name: 'Praise', color: 'green' },
+          { name: 'Other', color: 'gray' },
+        ]}};
+        if (!dbData.properties['Email']) needsProps['Email'] = { email: {} };
+        if (!dbData.properties['Timezone']) needsProps['Timezone'] = { rich_text: {} };
+        if (!dbData.properties['Strava ID']) needsProps['Strava ID'] = { rich_text: {} };
+        if (!dbData.properties['Submitted At']) needsProps['Submitted At'] = { date: {} };
+
+        if (Object.keys(needsProps).length > 0) {
+          await fetch(`https://api.notion.com/v1/databases/${env.NOTION_FEEDBACK_DB_ID}`, {
+            method: 'PATCH',
+            headers: notionHeaders,
+            body: JSON.stringify({ properties: needsProps }),
+          });
+        }
+
+        // Create page with structured properties
         const res = await fetch('https://api.notion.com/v1/pages', {
           method: 'POST',
           headers: notionHeaders,
           body: JSON.stringify({
             parent: { database_id: env.NOTION_FEEDBACK_DB_ID },
             properties: {
-              [titleKey]: { title: [{ text: { content: `[${category}] ${message.slice(0, 70)}` } }] },
+              [titleKey]: { title: [{ text: { content: message.slice(0, 80) } }] },
+              'Category': { select: { name: category } },
+              'Email': userEmail ? { email: userEmail } : { email: null },
+              'Timezone': { rich_text: [{ text: { content: userTimezone || '' } }] },
+              'Strava ID': { rich_text: [{ text: { content: athleteId || body.stravaId || '' } }] },
+              'Submitted At': { date: { start: new Date().toISOString() } },
             },
             children: [
-              { object: 'block', type: 'heading_3', heading_3: { rich_text: [{ text: { content: 'Details' } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Category: ${category}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Message: ${message}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Email: ${userEmail || 'N/A'}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Timezone: ${userTimezone || 'N/A'}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Strava ID: ${athleteId || body.stravaId || 'N/A'}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Version: 2.0.0-beta` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Submitted: ${new Date().toISOString()}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: message } }] } },
             ],
           }),
         });
