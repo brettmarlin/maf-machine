@@ -33,3 +33,4 @@ id = "da4c031c54784e1d878b087294a76421"
 [vars]
 DEV_MODE = "true"
 DEV_ATHLETE_ID = "9127290"
+REDIRECT_URI = "https://mafmachine.com"
