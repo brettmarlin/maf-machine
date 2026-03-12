@@ -232,9 +232,9 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   }
 
   return (
-    <div className="glass-card rounded-xl px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none [&_*]:outline-none [&_svg]:outline-none [&_svg]:!outline-0" tabIndex={-1} style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}>
+    <div className="glass-card rounded-xl px-1 py-4 sm:px-4 space-y-4 outline-none focus:outline-none [&_*]:outline-none [&_svg]:outline-none [&_svg]:!outline-0 max-w-full overflow-x-hidden" tabIndex={-1} style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}>
       {/* Unified toggle-legend row */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex flex-wrap items-center gap-0.5 gap-y-2">
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
           {/* HR — always on, not toggleable */}
           <span className={`flex items-center gap-1 text-xs rounded-full bg-white/10 text-white border border-white/20 ${isMobile ? 'px-2.5 py-1.5' : 'px-2 py-1.5'}`}>

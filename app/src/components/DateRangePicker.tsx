@@ -141,7 +141,7 @@ function CalendarMonth({
 }
 
 const COMPACT_LABELS: Record<string, string> = {
-  'Since MAF Start Date': 'Since Start',
+  'Since MAF Start Date': 'Start Date',
   'Last 3 months': '3 mo',
   'Last 6 months': '6 mo',
   'Last year': '1 yr',
@@ -260,7 +260,7 @@ export function DateRangePicker({ value, onChange, trainingStartDate, compact }:
 
       {/* Dropdown */}
       {open && (
-        <div className="fixed sm:absolute right-4 sm:right-0 left-4 sm:left-auto top-auto sm:top-full mt-1 shadow-2xl z-50 flex overflow-hidden sm:max-w-[calc(100vw-2rem)]" style={{
+        <div className="fixed sm:absolute right-4 sm:right-0 left-4 sm:left-auto top-auto sm:top-full mt-1 shadow-2xl z-[9999] flex overflow-hidden sm:max-w-[calc(100vw-2rem)]" style={{
             background: 'rgba(15, 15, 19, 0.95)',
             border: '1px solid rgba(255, 255, 255, 0.08)',
             backdropFilter: 'blur(12px)',
