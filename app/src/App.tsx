@@ -8,6 +8,7 @@ import { EmailCapture } from './components/EmailCapture'
 import { Dashboard } from './components/Dashboard'
 import PrivacyPolicy from './components/PrivacyPolicy'
 import Support from './components/Support'
+import { FeedbackWidget } from './components/FeedbackWidget'
 import { BADGES } from './lib/gameTypes'
 import { BASE_PATH } from './config'
 
@@ -216,7 +217,7 @@ export default function App() {
     setForceState('dashboard')
   }, [])
 
-  // Static pages
+  // Static pages (no feedback widget)
   if (forceState === 'privacy') return <PrivacyPolicy />
   if (forceState === 'support') return <Support />
 
@@ -234,14 +235,13 @@ export default function App() {
     gameSummary,
   )
 
-  // Landing — not authenticated
-  if (appState === 'landing') {
-    return <LandingPage />
-  }
+  // Resolve page content
+  let content: React.ReactNode = null
 
-  // Returning user — reconnect Strava (no onboarding, no celebration)
-  if (appState === 'connect_strava') {
-    return (
+  if (appState === 'landing') {
+    content = <LandingPage />
+  } else if (appState === 'connect_strava') {
+    content = (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6">
         <div className="max-w-md text-center space-y-8">
           <img
@@ -269,23 +269,17 @@ export default function App() {
         </div>
       </div>
     )
-  }
-
-  // Setup — authenticated but no settings (age)
-  if (appState === 'setup') {
-    return (
+  } else if (appState === 'setup') {
+    content = (
       <OnboardingSetup
         athleteName={settings.athlete_name}
         onComplete={handleSetupComplete}
       />
     )
-  }
-
-  // Badge celebration after setup
-  if (appState === 'setup_celebration') {
+  } else if (appState === 'setup_celebration') {
     const committedBadge = BADGES.find((b) => b.id === 'committed')
     if (committedBadge && gameSummary) {
-      return (
+      content = (
         <BadgeCelebration
           badge={committedBadge}
           onDismiss={handleCelebrationDone}
@@ -298,32 +292,30 @@ export default function App() {
           }}
         />
       )
+    } else {
+      // Fallback: no badge found, skip celebration
+      handleCelebrationDone()
     }
-    // Fallback: no badge found, skip celebration
-    handleCelebrationDone()
-    return null
+  } else if (appState === 'start_date') {
+    content = <TrainingStartDate onComplete={handleStartDateComplete} />
+  } else if (appState === 'backfill') {
+    content = <BackfillProgress onComplete={handleBackfillComplete} mafHr={settings.maf_hr} />
+  } else if (appState === 'email_capture') {
+    content = <EmailCapture onComplete={handleEmailComplete} />
+  } else {
+    // Dashboard — fully onboarded
+    content = (
+      <Dashboard
+        settings={settings}
+        onSettingsChange={setSettings}
+      />
+    )
   }
 
-  // Start date — settings saved, no training_start_date
-  if (appState === 'start_date') {
-    return <TrainingStartDate onComplete={handleStartDateComplete} />
-  }
-
-  // Backfill — start date set in past, backfill not run
-  if (appState === 'backfill') {
-    return <BackfillProgress onComplete={handleBackfillComplete} mafHr={settings.maf_hr} />
-  }
-
-  // Email capture — after celebration, before dashboard
-  if (appState === 'email_capture') {
-    return <EmailCapture onComplete={handleEmailComplete} />
-  }
-
-  // Dashboard — fully onboarded
   return (
-    <Dashboard
-      settings={settings}
-      onSettingsChange={setSettings}
-    />
+    <>
+      {content}
+      <FeedbackWidget />
+    </>
   )
 }

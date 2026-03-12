@@ -1263,6 +1263,91 @@ export default {
       }
     }
 
+    // --- Feedback → Notion ---
+    if (path === '/api/feedback' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { category?: string; message?: string; email?: string; stravaId?: string };
+        const message = (body.message || '').trim();
+        const category = body.category || 'Other';
+
+        if (message.length < 5 || message.length > 2000) {
+          return json({ error: 'Message must be between 5 and 2000 characters' }, 400);
+        }
+
+        if (!env.NOTION_API_KEY || !env.NOTION_FEEDBACK_DB_ID) {
+          return json({ error: 'Feedback not configured' }, 500);
+        }
+
+        const notionHeaders = {
+          'Authorization': `Bearer ${env.NOTION_API_KEY}`,
+          'Notion-Version': '2022-06-28',
+          'Content-Type': 'application/json',
+        };
+
+        // Schema setup on first use
+        const schemaFlag = await env.MAF_SETTINGS.get('notion_schema_initialized');
+        if (!schemaFlag) {
+          await fetch(`https://api.notion.com/v1/databases/${env.NOTION_FEEDBACK_DB_ID}`, {
+            method: 'PATCH',
+            headers: notionHeaders,
+            body: JSON.stringify({
+              properties: {
+                'Title': { title: {} },
+                'Category': { select: { options: [
+                  { name: 'Bug', color: 'red' },
+                  { name: 'Feature Request', color: 'blue' },
+                  { name: 'Confusion', color: 'yellow' },
+                  { name: 'Praise', color: 'green' },
+                  { name: 'Other', color: 'gray' },
+                ]}},
+                'Message': { rich_text: {} },
+                'Email': { email: {} },
+                'Strava ID': { rich_text: {} },
+                'App Version': { rich_text: {} },
+                'Status': { select: { options: [
+                  { name: 'New', color: 'blue' },
+                  { name: 'Reviewing', color: 'yellow' },
+                  { name: 'Done', color: 'green' },
+                  { name: "Won't Fix", color: 'gray' },
+                ]}},
+                'Submitted At': { date: {} },
+              },
+            }),
+          });
+          await env.MAF_SETTINGS.put('notion_schema_initialized', 'true');
+        }
+
+        // Create page in Notion
+        const res = await fetch('https://api.notion.com/v1/pages', {
+          method: 'POST',
+          headers: notionHeaders,
+          body: JSON.stringify({
+            parent: { database_id: env.NOTION_FEEDBACK_DB_ID },
+            properties: {
+              'Title': { title: [{ text: { content: message.slice(0, 80) } }] },
+              'Category': { select: { name: category } },
+              'Message': { rich_text: [{ text: { content: message } }] },
+              'Email': body.email ? { email: body.email } : { email: null },
+              'Strava ID': { rich_text: [{ text: { content: body.stravaId || '' } }] },
+              'App Version': { rich_text: [{ text: { content: '2.0.0-beta' } }] },
+              'Status': { select: { name: 'New' } },
+              'Submitted At': { date: { start: new Date().toISOString() } },
+            },
+          }),
+        });
+
+        if (!res.ok) {
+          console.error('Notion error:', await res.text());
+          return json({ error: 'Failed to submit' }, 500);
+        }
+
+        return json({ success: true });
+      } catch (e) {
+        console.error('Feedback error:', e);
+        return json({ error: 'Failed to submit' }, 500);
+      }
+    }
+
     // --- OAuth: Redirect to Strava ---
     if (path === '/api/auth/strava') {
       const baseUrl = getBaseUrl(request);
