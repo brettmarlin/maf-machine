@@ -238,24 +238,19 @@ export function DateRangePicker({ value, onChange, trainingStartDate, compact }:
 
   return (
     <div className="relative" ref={ref}>
-      {/* Trigger — compact, mobile-safe */}
+      {/* Trigger — emoji pill on mobile, text pill on desktop */}
       <button
         onClick={() => setOpen(!open)}
-        style={{
-          background: 'rgba(255, 255, 255, 0.05)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          borderRadius: '9999px',
-          padding: '6px 14px',
-          color: '#d1d5dc',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          cursor: 'pointer',
-        }}
+        className={compact
+          ? 'flex items-center text-xs rounded-full border bg-white/10 border-white/20 px-2.5 py-1.5 cursor-pointer'
+          : 'flex items-center gap-1.5 text-xs rounded-full border bg-white/5 border-white/15 px-3.5 py-1.5 text-gray-300 cursor-pointer'
+        }
       >
-        {compact ? (COMPACT_LABELS[value.label] || value.label) : value.label} <span style={{ opacity: 0.6 }}>↓</span>
+        {compact ? (
+          <span style={{ fontSize: 12 }}>📅</span>
+        ) : (
+          <>{value.label} <span style={{ opacity: 0.6 }}>↓</span></>
+        )}
       </button>
 
       {/* Dropdown */}
