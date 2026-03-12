@@ -14,12 +14,13 @@ import {
 import type { MAFTrend } from '../lib/mafAnalysis'
 import { formatPace, computeMAFTiers } from '../lib/mafAnalysis'
 
-type Overlay = 'pace' | 'ef' | 'cadence'
+type Overlay = 'pace' | 'ef' | 'cadence' | 'recovery'
 
 const OVERLAY_CONFIG: { key: Overlay; label: string }[] = [
   { key: 'pace', label: 'Pace' },
-  { key: 'ef', label: 'Efficency' },
+  { key: 'ef', label: 'Efficiency' },
   { key: 'cadence', label: 'Cadence' },
+  { key: 'recovery', label: 'Recovery' },
 ]
 
 interface Props {
@@ -129,6 +130,8 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
     rollingCadence: t.rollingCadence,
     qualifying: t.qualifying,
     timeInZonePct: t.timeInZonePct,
+    hrRecoveryRate: t.hrRecoveryRate,
+    rollingHrRecoveryRate: t.rollingHrRecoveryRate,
   }))
 
   const allHr = chartData.map((d) => d.avgHr).filter((v): v is number => v != null && v > 0)
@@ -147,6 +150,13 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
   const hasPace = overlays.has('pace')
   const hasEf = overlays.has('ef')
   const hasCadence = overlays.has('cadence')
+  const hasRecovery = overlays.has('recovery')
+
+  // Recovery rate domain
+  const allRecovery = chartData.map((d) => d.hrRecoveryRate).filter((v): v is number => v != null && v > 0)
+  const recoveryMin = allRecovery.length > 0 ? Math.floor(Math.min(...allRecovery) - 1) : 0
+  const recoveryMax = allRecovery.length > 0 ? Math.ceil(Math.max(...allRecovery) + 1) : 30
+  const recoveryDomain: [number, number] = [Math.max(0, recoveryMin), recoveryMax]
 
   const rightMargin = isMobile ? 2 : 5
   const leftMargin = isMobile ? -20 : -10
@@ -210,6 +220,13 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
             Cadence: {Math.round(data.cadence)} spm
           </p>
         )}
+
+        {/* Recovery rate if toggled */}
+        {overlays.has('recovery') && data.hrRecoveryRate != null && (
+          <p className="text-cyan-400 text-xs mt-0.5">
+            Recovery: {data.hrRecoveryRate.toFixed(1)} bpm/min
+          </p>
+        )}
       </div>
     )
   }
@@ -231,7 +248,8 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
           {OVERLAY_CONFIG.map((o) => {
             const active = overlays.has(o.key)
             const isEf = o.key === 'ef'
-            const icon = o.key === 'pace' ? '◆' : o.key === 'ef' ? '⚡' : '👟'
+            const isRecovery = o.key === 'recovery'
+            const icon = o.key === 'pace' ? '◆' : o.key === 'ef' ? '⚡' : o.key === 'recovery' ? '💓' : '👟'
             return (
               <button
                 key={o.key}
@@ -242,12 +260,14 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                   active
                     ? isEf
                       ? 'bg-maf-purple/10 text-purple-300 border-maf-purple/60'
-                      : 'bg-white/10 text-white border-white/20'
+                      : isRecovery
+                        ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/60'
+                        : 'bg-white/10 text-white border-white/20'
                     : 'bg-transparent text-gray-600 border-transparent hover:text-gray-400'
                 }`}
               >
                 {isMobile ? (
-                  <span style={{ fontSize: 12, color: active ? (isEf ? '#c4b5fd' : o.key === 'pace' ? '#e0e0e0' : undefined) : '#666' }}>
+                  <span style={{ fontSize: 12, color: active ? (isEf ? '#c4b5fd' : isRecovery ? '#67e8f9' : o.key === 'pace' ? '#e0e0e0' : undefined) : '#666' }}>
                     {icon}
                   </span>
                 ) : (
@@ -342,6 +362,21 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                 domain={['auto', 'auto']}
                 label={isMobile ? undefined : { value: 'spm', angle: 90, position: 'insideRight', fill: '#4b5563', fontSize: 11 }}
                 width={isMobile ? 0 : undefined}
+              />
+            )}
+
+            {/* Recovery rate axis (right side) — hidden on mobile */}
+            {hasRecovery && (
+              <YAxis
+                yAxisId="recovery"
+                orientation="right"
+                domain={recoveryDomain}
+                hide={isMobile}
+                tick={isMobile ? false : { fill: '#67e8f9', fontSize: 10 }}
+                tickLine={!isMobile}
+                axisLine={!isMobile}
+                tickFormatter={(v) => `${v}`}
+                width={isMobile ? 0 : 35}
               />
             )}
 
@@ -497,6 +532,31 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
                   connectNulls
                   name="Cadence avg"
                   strokeDasharray="2 2"
+                />
+              </>
+            )}
+
+            {/* Recovery rate overlay — cyan dots + line */}
+            {hasRecovery && (
+              <>
+                <Scatter
+                  yAxisId="recovery"
+                  dataKey="hrRecoveryRate"
+                  shape={(props: any) => {
+                    if (!props.cx || !props.cy) return null
+                    return <circle cx={props.cx} cy={props.cy} r={2.5} fill="#22d3ee" fillOpacity={0.6} stroke="#22d3ee" strokeWidth={4} strokeOpacity={0.15} />
+                  }}
+                  name="Recovery Rate"
+                />
+                <Line
+                  yAxisId="recovery"
+                  dataKey="rollingHrRecoveryRate"
+                  stroke="#22d3ee"
+                  strokeWidth={1.5}
+                  dot={false}
+                  connectNulls
+                  name="Recovery avg"
+                  strokeDasharray="4 2"
                 />
               </>
             )}

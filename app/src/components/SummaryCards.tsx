@@ -87,6 +87,7 @@ function trendLabel(direction: TrendDirection, metric: string): string {
     hr: { improving: 'HR dropping', plateau: 'Stable', regressing: 'HR rising' },
     pace: { improving: 'Getting faster', plateau: 'Stable', regressing: 'Slowing' },
     ef: { improving: 'Improving', plateau: 'Stable', regressing: 'Declining' },
+    recovery: { improving: 'Recovering faster', plateau: 'Stable', regressing: 'Slowing down' },
   }
   return labels[metric]?.[direction] || direction
 }
@@ -203,8 +204,8 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
         </div>
       </div>
 
-      {/* Secondary: Cadence, Time in Zone, Efficiency — compact full-width cards */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Secondary: Cadence, Time in Zone, Efficiency, Recovery — compact full-width cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {/* Cadence */}
         <div className="glass-card rounded-xl p-3">
           <div>
@@ -252,6 +253,25 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
           </div>
           <p className="text-lg font-semibold text-gray-300 mt-1">
             {summary.currentEf !== null ? formatEF(summary.currentEf) : '—'}
+          </p>
+        </div>
+
+        {/* Recovery Rate */}
+        <div className="glass-card rounded-xl p-3">
+          <div>
+            <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
+              Recovery
+              <InfoTooltip text="How fast your heart rate drops when you walk after going over ceiling. Higher = better aerobic fitness. Measured in bpm per minute of recovery." />
+            </p>
+            <span className={`text-[10px] ${trendColor(summary.hrRecoveryTrendDirection)}`}>
+              {trendArrow(summary.hrRecoveryTrendDirection, 'recovery')} {trendLabel(summary.hrRecoveryTrendDirection, 'recovery')}
+            </span>
+          </div>
+          <p className="text-lg font-semibold text-gray-300 mt-1">
+            {summary.currentHrRecoveryRate !== null ? summary.currentHrRecoveryRate.toFixed(1) : '—'}
+            {summary.currentHrRecoveryRate !== null && (
+              <span className="text-xs font-normal text-gray-600 ml-1">bpm/min</span>
+            )}
           </p>
         </div>
       </div>
