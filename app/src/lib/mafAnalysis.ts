@@ -97,6 +97,9 @@ export interface MAFTrend {
   rollingDecoupling: number | null
   timeInZonePct: number   // now = time_below_ceiling_pct
   qualifying: boolean
+  // HR Recovery
+  hrRecoveryRate: number | null           // bpm/min for this run (null if no events)
+  rollingHrRecoveryRate: number | null    // rolling avg bpm/min
 }
 
 export interface MAFSummary {
@@ -115,6 +118,9 @@ export interface MAFSummary {
   avgDecoupling: number | null
   avgCadence: number | null
   cadenceTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
+  // HR Recovery
+  currentHrRecoveryRate: number | null
+  hrRecoveryTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient'
   totalRuns: number
   totalQualifyingRuns: number
   qualifyingPct: number
@@ -637,6 +643,12 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
       ? decouplingWindow.reduce((sum, w) => sum + w.aerobic_decoupling!, 0) / decouplingWindow.length
       : null
 
+    // HR Recovery rolling — only runs with recovery events
+    const recoveryWindow = window.filter((w) => w.hr_recovery_rate_bpm_per_min !== null)
+    const rollingHrRecoveryRate = recoveryWindow.length >= 2
+      ? recoveryWindow.reduce((sum, w) => sum + w.hr_recovery_rate_bpm_per_min!, 0) / recoveryWindow.length
+      : null
+
     return {
       date: a.date,
       name: a.name,
@@ -655,6 +667,8 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
       rollingDecoupling,
       timeInZonePct: a.time_below_ceiling_pct,
       qualifying: a.qualifying,
+      hrRecoveryRate: a.hr_recovery_rate_bpm_per_min,
+      rollingHrRecoveryRate,
     }
   })
 }
@@ -678,6 +692,8 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
       avgDecoupling: null,
       avgCadence: null,
       cadenceTrendDirection: 'insufficient',
+      currentHrRecoveryRate: null,
+      hrRecoveryTrendDirection: 'insufficient',
       totalRuns: 0,
       totalQualifyingRuns: 0,
       qualifyingPct: 0,
@@ -790,6 +806,25 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     else cadenceTrendDirection = 'plateau'
   }
 
+  // HR Recovery Rate — 4wk avg and trend
+  const recentRecovery = recent.filter((a) => a.hr_recovery_rate_bpm_per_min !== null)
+  const currentHrRecoveryRate = recentRecovery.length > 0
+    ? recentRecovery.reduce((sum, a) => sum + a.hr_recovery_rate_bpm_per_min!, 0) / recentRecovery.length
+    : null
+
+  let hrRecoveryTrendDirection: 'improving' | 'plateau' | 'regressing' | 'insufficient' = 'insufficient'
+  const recoveryTrend = trendWindow.filter((a) => a.hr_recovery_rate_bpm_per_min !== null)
+  if (recoveryTrend.length >= 3) {
+    const baseTime = new Date(recoveryTrend[0].date).getTime()
+    const toWeeks = (d: string) => (new Date(d).getTime() - baseTime) / (7 * 24 * 60 * 60 * 1000)
+    const recoveryPoints = recoveryTrend.map((a) => ({ x: toWeeks(a.date), y: a.hr_recovery_rate_bpm_per_min! }))
+    const recoverySlope = linearSlope(recoveryPoints)
+    // Higher recovery rate = faster recovery = improving
+    if (recoverySlope > 0.3) hrRecoveryTrendDirection = 'improving'
+    else if (recoverySlope < -0.3) hrRecoveryTrendDirection = 'regressing'
+    else hrRecoveryTrendDirection = 'plateau'
+  }
+
   return {
     currentAvgHr,
     hrTrendDirection,
@@ -804,6 +839,8 @@ export function computeSummary(activities: MAFActivity[]): MAFSummary {
     avgDecoupling,
     avgCadence,
     cadenceTrendDirection,
+    currentHrRecoveryRate,
+    hrRecoveryTrendDirection,
     totalRuns: included.length,
     totalQualifyingRuns: qualifying.length,
     qualifyingPct: included.length > 0 ? (qualifying.length / included.length) * 100 : 0,
