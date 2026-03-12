@@ -26,6 +26,10 @@ export interface Env {
   DEV_MODE?: string;
   DEV_ATHLETE_ID?: string;
   COACHING_ENABLED?: string;
+  BREVO_API_KEY?: string;
+  BREVO_LIST_ID?: string;
+  NOTION_FEEDBACK_DB_ID?: string;
+  NOTION_API_KEY?: string;
 }
 
 interface StravaTokenResponse {
@@ -1220,6 +1224,43 @@ export default {
         current_iso_week: currentISOWeek,
         timezone: tz,
       });
+    }
+
+    // --- Collect Email (Brevo) ---
+    if (path === '/api/collect-email' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { email?: string; source?: string };
+        const email = (body.email || '').trim().toLowerCase();
+        const source = body.source || 'app';
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return json({ error: 'Invalid email' }, 400);
+        }
+
+        // Best-effort: store in KV as backup
+        const athleteId = await resolveSession(request, env).catch(() => null);
+        if (athleteId) {
+          await env.MAF_SETTINGS.put(`email:${athleteId}`, JSON.stringify({ email, source, ts: new Date().toISOString() }));
+        }
+
+        // Best-effort: send to Brevo
+        if (env.BREVO_API_KEY) {
+          const listId = parseInt(env.BREVO_LIST_ID || '5', 10);
+          await fetch('https://api.brevo.com/v3/contacts', {
+            method: 'POST',
+            headers: { 'api-key': env.BREVO_API_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              listIds: [listId],
+              attributes: { SOURCE: source, SIGNUP_DATE: new Date().toISOString().slice(0, 10) },
+            }),
+          }).catch(() => {}); // Swallow errors — never block user on marketing API
+        }
+
+        return json({ success: true });
+      } catch {
+        return json({ success: true }); // Never block user
+      }
     }
 
     // --- OAuth: Redirect to Strava ---

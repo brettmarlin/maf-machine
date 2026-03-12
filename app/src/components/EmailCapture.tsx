@@ -13,24 +13,35 @@ export function EmailCapture({ onComplete }: Props) {
   const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [touched, setTouched] = useState(false)
 
   const valid = isValidEmail(email)
 
   async function handleSubmit() {
-    if (!valid) return
+    setTouched(true)
+    if (!valid) {
+      setError(email.trim() === '' ? 'Please enter your email to continue' : 'Please enter a valid email to continue')
+      return
+    }
     setSaving(true)
     setError('')
     try {
-      const res = await fetch(`${BASE_PATH}/api/settings`, {
+      // Save to settings
+      await fetch(`${BASE_PATH}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       })
-      if (!res.ok) throw new Error('Failed to save')
+      // Send to Brevo (best-effort — navigate regardless)
+      fetch(`${BASE_PATH}/api/collect-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, source: 'app' }),
+      }).catch(() => {})
       onComplete()
     } catch {
-      setError('Something went wrong. Please try again.')
-      setSaving(false)
+      // Navigate anyway — never block the user
+      onComplete()
     }
   }
 
@@ -47,11 +58,13 @@ export function EmailCapture({ onComplete }: Props) {
           <input
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && valid && handleSubmit()}
+            onChange={(e) => { setEmail(e.target.value); if (touched) setError('') }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
             placeholder="you@example.com"
             autoFocus
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-green-500/50 transition-colors"
+            className={`w-full bg-gray-900 border rounded-lg px-4 py-3 text-white text-sm focus:outline-none transition-colors ${
+              error ? 'border-red-500/70 focus:border-red-400' : 'border-gray-800 focus:border-green-500/50'
+            }`}
           />
           {error && (
             <p className="text-sm text-red-400">{error}</p>
@@ -61,16 +74,15 @@ export function EmailCapture({ onComplete }: Props) {
         <div className="space-y-3">
           <button
             onClick={handleSubmit}
-            disabled={!valid || saving}
+            disabled={saving}
             className="w-full py-3.5 rounded-lg font-semibold text-base transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-green-500 hover:bg-green-400 text-gray-950"
           >
-            {saving ? 'Saving...' : 'See your dashboard'}
-          </button>
-          <button
-            onClick={onComplete}
-            className="block w-full text-sm text-gray-500 hover:text-gray-300 transition-colors"
-          >
-            Skip for now →
+            {saving ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                Saving...
+              </span>
+            ) : 'See your dashboard'}
           </button>
           <p className="text-[11px] text-gray-600">
             By continuing you agree to our{' '}
