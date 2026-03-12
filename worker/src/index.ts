@@ -1437,7 +1437,7 @@ export default {
         if (sessionId) {
           await env.MAF_TOKENS.delete(`session:${sessionId}`);
         }
-        const host = request.headers.get('Host') || 'maf-dev.marliin.com';
+        const host = request.headers.get('Host') || 'mafmachine.com';
         const protocol = host.includes('localhost') ? 'http' : 'https';
         const origin = `${protocol}://${host}`;
         const cookie = host.includes('localhost')
