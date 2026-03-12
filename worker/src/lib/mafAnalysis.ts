@@ -109,6 +109,11 @@ export interface MAFActivity {
   qualifying: boolean;
   excluded: boolean;
 
+  // HR Recovery
+  hr_recovery_events: number;                        // count of walk-recovery events
+  hr_recovery_rate_bpm_per_min: number | null;       // avg bpm/min drop rate (null if no events)
+  hr_recovery_time_avg_seconds: number | null;       // avg seconds to return to ceiling (null if no events)
+
   // Backward compat aliases (frontend v1 reads these)
   time_in_maf_zone_pct: number;
   time_in_qualifying_zone_pct: number;
@@ -318,6 +323,95 @@ function computePaceSteadiness(
   return Math.round(Math.max(0, 100 - cv * 500));
 }
 
+// ─── HR Recovery Rate ────────────────────────────────────────────────────────
+
+interface HRRecoveryResult {
+  hr_recovery_events: number;
+  hr_recovery_rate_bpm_per_min: number | null;
+  hr_recovery_time_avg_seconds: number | null;
+}
+
+const WALK_VELOCITY = 1.8;       // m/s — brisk walk threshold to start event
+const RESUME_VELOCITY = 2.2;     // m/s — runner picks up again
+const MAX_EVENT_SECONDS = 120;   // cap recovery event duration
+const MIN_HR_DROP_NEEDED = 3;    // bpm above ceiling to count as meaningful spike
+const MIN_ACTUAL_DROP = 2;       // bpm of actual drop required
+
+/**
+ * Detect walk-recovery events where HR is above ceiling and velocity drops
+ * below walking threshold, then measure how fast HR drops back down.
+ */
+function computeHRRecovery(
+  hr: number[],
+  velocity: number[],
+  ceiling: number,
+): HRRecoveryResult {
+  const len = Math.min(hr.length, velocity.length);
+  const events: { rate_bpm_per_min: number; recovery_seconds: number; complete: boolean }[] = [];
+
+  let i = 0;
+  while (i < len) {
+    // Look for event start: HR > ceiling AND velocity < walk threshold
+    if (hr[i] > ceiling && velocity[i] < WALK_VELOCITY) {
+      const startHr = hr[i];
+      const hrDropNeeded = startHr - ceiling;
+      const eventStart = i;
+      let eventEnd = i;
+
+      // Walk forward to find event end
+      for (let j = i + 1; j < len; j++) {
+        const elapsed = j - eventStart;
+        if (hr[j] <= ceiling) {
+          eventEnd = j;
+          break;
+        }
+        if (elapsed >= MAX_EVENT_SECONDS) {
+          eventEnd = j;
+          break;
+        }
+        if (velocity[j] > RESUME_VELOCITY) {
+          eventEnd = j;
+          break;
+        }
+        eventEnd = j;
+      }
+
+      const durationSeconds = eventEnd - eventStart;
+      if (durationSeconds > 0 && hrDropNeeded >= MIN_HR_DROP_NEEDED) {
+        const actualDrop = startHr - hr[eventEnd];
+        const complete = hr[eventEnd] <= ceiling;
+        if (actualDrop >= MIN_ACTUAL_DROP) {
+          events.push({
+            rate_bpm_per_min: (actualDrop / durationSeconds) * 60,
+            recovery_seconds: durationSeconds,
+            complete,
+          });
+        }
+      }
+
+      i = eventEnd + 1;
+    } else {
+      i++;
+    }
+  }
+
+  if (events.length === 0) {
+    return { hr_recovery_events: 0, hr_recovery_rate_bpm_per_min: null, hr_recovery_time_avg_seconds: null };
+  }
+
+  const avgRate = events.reduce((sum, e) => sum + e.rate_bpm_per_min, 0) / events.length;
+  const completeEvents = events.filter((e) => e.complete);
+  const avgTime = completeEvents.length > 0
+    ? completeEvents.reduce((sum, e) => sum + e.recovery_seconds, 0) / completeEvents.length
+    : null;
+
+  return {
+    hr_recovery_events: events.length,
+    hr_recovery_rate_bpm_per_min: Math.round(avgRate * 10) / 10,
+    hr_recovery_time_avg_seconds: avgTime !== null ? Math.round(avgTime) : null,
+  };
+}
+
 // ─── Main Analysis Function ──────────────────────────────────────────────────
 
 /**
@@ -356,6 +450,7 @@ export function analyzeActivity(
   let warmupScore = 0;
   let negativeSplit = false;
   let paceSteadinessScore = 0;
+  let hrRecovery: HRRecoveryResult = { hr_recovery_events: 0, hr_recovery_rate_bpm_per_min: null, hr_recovery_time_avg_seconds: null };
 
   if (streams?.heartrate?.data && streams?.velocity_smooth?.data) {
     const hr = streams.heartrate.data;
@@ -430,6 +525,9 @@ export function analyzeActivity(
     negativeSplit = computeNegativeSplit(velocity.slice(0, len));
     paceSteadinessScore = computePaceSteadiness(velocity, hr, tiers.ceiling);
 
+    // ── HR Recovery Rate ─────────────────────────────────────────────────
+    hrRecovery = computeHRRecovery(hr.slice(0, len), velocity.slice(0, len), tiers.ceiling);
+
   } else {
     // No stream data — estimate from averages
     if (activity.average_heartrate) {
@@ -487,6 +585,11 @@ export function analyzeActivity(
     longest_zone_streak_minutes: longestZoneStreakMinutes,
     zone_entries: zoneEntries,
     warmup_score: warmupScore,
+
+    // HR Recovery
+    hr_recovery_events: hrRecovery.hr_recovery_events,
+    hr_recovery_rate_bpm_per_min: hrRecovery.hr_recovery_rate_bpm_per_min,
+    hr_recovery_time_avg_seconds: hrRecovery.hr_recovery_time_avg_seconds,
 
     // Status
     qualifying,
