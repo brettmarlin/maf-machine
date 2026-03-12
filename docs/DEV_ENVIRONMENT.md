@@ -373,6 +373,19 @@ Before starting with this new setup, clean up the hacks from today's session:
 
 ---
 
+## What Can't Be Tested Locally
+
+The following flows require testing on `maf-dev.marliin.com` — DEV_MODE auth bypass makes them untestable on localhost:
+
+- Disconnect Strava / reconnect flow
+- Session expiry handling
+- OAuth callback routing
+- Cookie behavior
+
+For these, deploy to dev first, then test on the live URL.
+
+---
+
 ## Quick Reference
 
 | Task | Command |

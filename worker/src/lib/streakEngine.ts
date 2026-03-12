@@ -4,7 +4,7 @@
 
 import type { MAFActivity } from './mafAnalysis';
 import type { GameState, WeeklyRecord } from './gameTypes';
-import { getISOWeek, getStreakMultiplier } from './gameTypes';
+import { getISOWeek, getISOWeekInTimezone, getStreakMultiplier } from './gameTypes';
 import { getConsistencyBadges } from './badgeEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -47,9 +47,13 @@ export function updateWeeklyProgress(
   activity: MAFActivity,
   gameState: GameState,
   mafCeiling: number,
+  timezone?: string,
 ): WeeklyProgressUpdate {
-  const runDate = new Date(activity.date);
-  const week = getISOWeek(runDate);
+  const dateStr = activity.date.includes('T')
+  ? activity.date
+  : `${activity.date}T12:00:00Z`;
+  const runDate = new Date(dateStr);
+  const week = timezone ? getISOWeekInTimezone(runDate, timezone) : getISOWeek(runDate);
 
   // Find or create the weekly record
   const existingIndex = gameState.weekly_history.findIndex((w) => w.week === week);

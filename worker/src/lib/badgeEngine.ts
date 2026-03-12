@@ -203,3 +203,4 @@ export function getConsistencyBadges(
 
   return newBadges;
 }
+

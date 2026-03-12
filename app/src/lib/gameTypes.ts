@@ -155,6 +155,7 @@ export const BADGES: BadgeDefinition[] = [
   { id: 'proof_positive',    category: 'maf_test',   name: 'Proof Positive',     icon: '📈', message: 'Faster at the same heart rate. This is the proof.',                                         trigger: 'maf_test_improved',           points_reward: 200 },
   { id: 'triple_proof',      category: 'maf_test',   name: 'Triple Proof',       icon: '🏆', message: 'Three tests, three improvements. The trend is undeniable.',                                  trigger: '3_consecutive_improvements',  points_reward: 300 },
   { id: 'year_of_tests',     category: 'maf_test',   name: 'Year of Tests',      icon: '🎖️', message: 'A full year of tracking. You have data most coaches would envy.',                          trigger: '12_tests_12_months',          points_reward: 500 },
+
 ];
 
 export function getBadgeDef(id: string): BadgeDefinition | undefined {

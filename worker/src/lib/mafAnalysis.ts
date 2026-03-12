@@ -12,6 +12,7 @@ export interface UserSettings {
   maf_hr: number;            // 180 - age + modifier = CEILING
   start_date: string | null;
   training_start_date?: string | null;
+  timezone?: string;          // IANA timezone from Strava (e.g., "America/New_York")
 }
 
 export interface MAFTiers {
@@ -53,6 +54,7 @@ export interface StravaActivity {
   timezone?: string;
   start_latlng?: [number, number];
   elapsed_time: number;
+  moving_time: number;
   distance: number;
   average_heartrate?: number;
   average_cadence?: number;
@@ -331,8 +333,10 @@ export function analyzeActivity(
   const { maf_hr, units } = settings;
   const tiers = computeMAFTiers(maf_hr);
 
-  const avgPace = activity.average_speed > 0
-    ? velocityToPace(activity.average_speed, units)
+  // avg_pace = moving_time / distance (matches Strava display, includes walks)
+  const movingTime = activity.moving_time || activity.elapsed_time;
+  const avgPace = movingTime > 0 && activity.distance > 0
+    ? (movingTime / 60) / (activity.distance / (units === 'mi' ? METERS_PER_MILE : METERS_PER_KM))
     : 0;
 
   const ef = computeEF(activity.average_speed, activity.average_heartrate || 0);
@@ -437,6 +441,8 @@ export function analyzeActivity(
       }
     }
   }
+
+  console.log(`Pace check — avg: ${avgPace.toFixed(4)}, maf: ${mafPace.toFixed(4)}, strava_moving_time: ${movingTime}`);
 
   // Qualifying: ≥20 min AND ≥60% below ceiling AND avg HR ≤ ceiling
   const qualifying = !excluded

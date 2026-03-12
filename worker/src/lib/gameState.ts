@@ -16,6 +16,8 @@ import {
   getLevelProgressPct,
   getStreakMultiplier,
   getISOWeek,
+  getISOWeekInTimezone,
+  getPreviousISOWeek,
   BADGES,
   LEVEL_TABLE,
 } from './gameTypes';
@@ -168,7 +170,8 @@ export async function processNewRun(
   const allBadgesEarned: BadgeDefinition[] = [];
 
   // 2. Update weekly progress
-  const weeklyUpdate = updateWeeklyProgress(activity, state, settings.maf_hr);
+  const tz = settings.timezone || 'America/New_York';
+  const weeklyUpdate = updateWeeklyProgress(activity, state, settings.maf_hr, tz);
 
   // 3. Check if prior week needs evaluation BEFORE adding current week to history
   const pendingWeek = getPendingWeekEvaluation(weeklyUpdate.week, state);
@@ -183,13 +186,17 @@ export async function processNewRun(
     }
   }
 
-  // Evaluate prior week if needed
-  if (pendingWeek && pendingWeek !== weeklyUpdate.week) {
+  // Evaluate prior week if this is a new week
+  if (weeklyUpdate.is_new_week && pendingWeek && pendingWeek !== weeklyUpdate.week) {
+    const currentWeek = weeklyUpdate.week;
+    const prevWeek = getPreviousISOWeek(currentWeek);
+
+    // Step 1: Evaluate the most recent completed week (bonus XP, badges)
     const priorRecord = state.weekly_history.find((w) => w.week === pendingWeek);
     if (priorRecord) {
       const weekResult = evaluateWeekEnd(priorRecord, state);
-
       weeklyBonusXP = weekResult.weekly_bonus_xp;
+
       state.streak_current_weeks = weekResult.new_streak_weeks;
       state.streak_longest = weekResult.new_streak_longest;
       state.streak.current_weeks = weekResult.new_streak_weeks;
@@ -211,6 +218,14 @@ export async function processNewRun(
       }
 
       priorRecord.xp_earned += weeklyBonusXP;
+    }
+
+    // Step 2: Gap detection — if the evaluated week isn't the immediate
+    // previous week, there were empty weeks with no runs → reset streak
+    if (pendingWeek < prevWeek) {
+      state.streak_current_weeks = 0;
+      state.streak.current_weeks = 0;
+      state.streak.frozen = false;
     }
   }
 
@@ -328,7 +343,7 @@ export async function onSettingsSaved(
  * Determine the single most important next action for the runner.
  * Priority: streak protection > badge within reach > level progress > weekly target > encouragement
  */
-export function buildNextStep(state: GameState, settings?: { maf_hr?: number }): NextStep {
+export function buildNextStep(state: GameState, settings?: { maf_hr?: number; timezone?: string }): NextStep {
   // Priority 0: First run — brand new runner
   if (state.lifetime_total_runs === 0) {
     const ceiling = settings?.maf_hr;
@@ -341,8 +356,9 @@ export function buildNextStep(state: GameState, settings?: { maf_hr?: number }):
     };
   }
 
+  const tz = settings?.timezone || 'America/New_York';
   const now = new Date();
-  const currentWeek = getISOWeek(now);
+  const currentWeek = getISOWeekInTimezone(now, tz);
   const currentWeekRecord = state.weekly_history.find((w) => w.week === currentWeek);
   const weeklyZoneMinutes = currentWeekRecord?.zone_minutes || 0;
   const weeklyTarget = state.weekly_target_zone_minutes;
@@ -485,7 +501,7 @@ function getNextAchievableBadge(state: GameState): { message: string; detail: st
 
 // ─── API Response Builder ────────────────────────────────────────────────────
 
-export function buildGameAPIResponse(state: GameState, settings?: { maf_hr?: number }): GameAPIResponse {
+export function buildGameAPIResponse(state: GameState, settings?: { maf_hr?: number; timezone?: string }): GameAPIResponse {
   const level = getLevelFromXP(state.xp_total);
   const xpToNext = getXPToNextLevel(state.xp_total);
   const levelPct = getLevelProgressPct(state.xp_total);
@@ -493,8 +509,9 @@ export function buildGameAPIResponse(state: GameState, settings?: { maf_hr?: num
   const nextLevelName = nextLevelIdx >= 0 ? LEVEL_TABLE[nextLevelIdx].name : null;
 
   // Current week info
+  const tz = settings?.timezone || 'America/New_York';
   const now = new Date();
-  const currentWeek = getISOWeek(now);
+  const currentWeek = getISOWeekInTimezone(now, tz);
   const currentWeekRecord = state.weekly_history.find((w) => w.week === currentWeek);
 
   // Days left in week (week starts Monday)

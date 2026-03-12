@@ -155,6 +155,7 @@ export const BADGES: BadgeDefinition[] = [
   { id: 'proof_positive',    category: 'maf_test',   name: 'Proof Positive',     icon: '📈', message: 'Faster at the same heart rate. This is the proof.',                                         trigger: 'maf_test_improved',           points_reward: 200 },
   { id: 'triple_proof',      category: 'maf_test',   name: 'Triple Proof',       icon: '🏆', message: 'Three tests, three improvements. The trend is undeniable.',                                  trigger: '3_consecutive_improvements',  points_reward: 300 },
   { id: 'year_of_tests',     category: 'maf_test',   name: 'Year of Tests',      icon: '🎖️', message: 'A full year of tracking. You have data most coaches would envy.',                          trigger: '12_tests_12_months',          points_reward: 500 },
+
 ];
 
 export function getBadgeDef(id: string): BadgeDefinition | undefined {
@@ -390,4 +391,68 @@ export function getISOWeek(date: Date): string {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const weekNum = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${d.getUTCFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Get ISO week string from a date in a specific timezone: "2025-W07"
+ * Falls back to UTC-based getISOWeek if timezone is invalid.
+ */
+export function getISOWeekInTimezone(date: Date, timezone: string): string {
+  try {
+    // Get the local date components in the target timezone
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+
+    const year = parseInt(parts.find((p) => p.type === 'year')!.value);
+    const month = parseInt(parts.find((p) => p.type === 'month')!.value) - 1;
+    const day = parseInt(parts.find((p) => p.type === 'day')!.value);
+
+    // Build a UTC date from the local date components
+    const localDate = new Date(Date.UTC(year, month, day));
+    return getISOWeek(localDate);
+  } catch {
+    return getISOWeek(date);
+  }
+}
+
+/**
+ * Get the ISO week immediately after the given week.
+ * Handles year boundaries (e.g., "2025-W52" → "2026-W01").
+ */
+export function getNextISOWeek(isoWeek: string): string {
+  const match = isoWeek.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return isoWeek;
+  let year = parseInt(match[1]);
+  let week = parseInt(match[2]);
+  // Get max weeks in this year
+  const dec28 = new Date(Date.UTC(year, 11, 28));
+  const maxWeek = parseInt(getISOWeek(dec28).split('-W')[1]);
+  week += 1;
+  if (week > maxWeek) {
+    year += 1;
+    week = 1;
+  }
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * Get the ISO week immediately before the given week.
+ * Handles year boundaries (e.g., "2026-W01" → "2025-W52").
+ */
+export function getPreviousISOWeek(isoWeek: string): string {
+  const match = isoWeek.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return isoWeek;
+  let year = parseInt(match[1]);
+  let week = parseInt(match[2]);
+  week -= 1;
+  if (week < 1) {
+    year -= 1;
+    const dec28 = new Date(Date.UTC(year, 11, 28));
+    week = parseInt(getISOWeek(dec28).split('-W')[1]);
+  }
+  return `${year}-W${String(week).padStart(2, '0')}`;
 }

@@ -119,6 +119,8 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
     avgHr: t.avgHr,
     hrInZone: t.hrInZone,
     rollingHr: t.rollingHr,
+    avgPace: t.avgPace,
+    rollingAvgPace: t.rollingAvgPace,
     mafPace: t.mafPace,
     rollingMafPace: t.rollingMafPace,
     ef: t.ef,
@@ -181,10 +183,10 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
         )}
 
         {/* Pace — always show on mobile since axis is hidden */}
-        {(overlays.has('pace') || isMobile) && data.mafPace > 0 && (
+        {(overlays.has('pace') || isMobile) && data.avgPace > 0 && (
           <p className="text-gray-300 mt-0.5">
             <span className="text-gray-500">Pace:</span>{' '}
-            <span className="font-semibold">{formatPace(data.mafPace, units)}</span>
+            <span className="font-semibold">{formatPace(data.avgPace, units)}</span>
           </p>
         )}
 
@@ -433,13 +435,13 @@ export function TrendChart({ trends, units, mafHr, datePickerSlot }: Props) {
               <>
                 <Scatter
                   yAxisId="pace"
-                  dataKey="mafPace"
+                  dataKey="avgPace"
                   shape={<DiamondDot />}
-                  name="MAF Pace"
+                  name="Pace"
                 />
                 <Line
                   yAxisId="pace"
-                  dataKey="rollingMafPace"
+                  dataKey="rollingAvgPace"
                   stroke="#E0E0E0"
                   strokeWidth={0.5}
                   dot={false}

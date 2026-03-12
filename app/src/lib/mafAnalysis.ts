@@ -79,7 +79,9 @@ export interface MAFTrend {
   hrInZone: number | null           // avg HR while below ceiling
   rollingHr: number | null
   // Secondary overlays
-  mafPace: number | null
+  avgPace: number | null            // overall pace (moving_time / distance)
+  rollingAvgPace: number | null
+  mafPace: number | null            // pace while below ceiling only
   rollingMafPace: number | null
   ef: number | null
   rollingEf: number | null
@@ -309,8 +311,10 @@ export function analyzeActivity(
 ): MAFActivity {
   const tiers = computeMAFTiers(mafHr)
 
-  const avgPace = activity.average_speed > 0
-    ? velocityToPace(activity.average_speed, units)
+  // avg_pace = moving_time / distance (matches Strava display, includes walks)
+  const movingTime = activity.moving_time || activity.elapsed_time
+  const avgPace = movingTime > 0 && activity.distance > 0
+    ? (movingTime / 60) / (activity.distance / (units === 'mi' ? METERS_PER_MILE : METERS_PER_KM))
     : 0
 
   const ef = computeEF(activity.average_speed, activity.average_heartrate || 0)
@@ -518,6 +522,9 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
 
     // Pace rolling — exclude cycling and zero-pace activities
     const paceWindow = window.filter(hasPace)
+    const rollingAvgPace = paceWindow.length >= 2
+      ? paceWindow.reduce((sum, w) => sum + w.avg_pace, 0) / paceWindow.length
+      : null
     const rollingMafPace = paceWindow.length >= 2
       ? paceWindow.reduce((sum, w) => sum + w.maf_pace, 0) / paceWindow.length
       : null
@@ -544,6 +551,8 @@ export function computeTrends(activities: MAFActivity[]): MAFTrend[] {
       avgHr: hasHR(a) ? a.avg_hr : null,
       hrInZone: a.hr_in_zone,
       rollingHr,
+      avgPace: hasPace(a) ? a.avg_pace : null,
+      rollingAvgPace,
       mafPace: hasPace(a) ? a.maf_pace : null,
       rollingMafPace,
       ef: hasEF(a) ? a.efficiency_factor : null,

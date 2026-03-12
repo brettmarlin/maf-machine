@@ -1,6 +1,7 @@
 import { analyzeActivity } from './lib/mafAnalysis';
 import type { StravaActivity, StreamData, UserSettings, MAFActivity } from './lib/mafAnalysis';
-import type { GameState } from './lib/gameTypes';
+import type { GameState, WeeklyRecord } from './lib/gameTypes';
+import { getISOWeekInTimezone, getNextISOWeek } from './lib/gameTypes';
 import { loadGameState, processNewRun, onSettingsSaved, buildGameAPIResponse, saveGameState } from './lib/gameState';
 import { fetchActivityWeather } from './lib/weatherService';
 import { handleDeauthorization, handleScheduled } from './lib/cleanupDeauthorized';
@@ -37,6 +38,7 @@ interface StravaTokenResponse {
     lastname: string;
     profile_medium?: string;
     profile?: string;
+    timezone?: string;
   };
 }
 
@@ -209,24 +211,23 @@ async function processWebhookActivity(
     return;
   }
 
-  // 4. Fetch streams
+  // 4. Fetch streams (always re-fetch — Strava sends update webhooks after GPS reprocessing)
   let streams: StreamData | null = null;
   const streamCacheKey = `${athleteId}:stream:${activityId}`;
-  const cachedStream = await env.MAF_ACTIVITIES.get(streamCacheKey);
 
-  if (cachedStream) {
-    streams = JSON.parse(cachedStream);
+  const streamRes = await fetch(
+    `https://www.strava.com/api/v3/activities/${activityId}/streams?keys=heartrate,cadence,velocity_smooth,time,distance,altitude&key_by_type=true`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (streamRes.ok) {
+    streams = await streamRes.json();
+    await env.MAF_ACTIVITIES.put(streamCacheKey, JSON.stringify(streams));
   } else {
-    const streamRes = await fetch(
-      `https://www.strava.com/api/v3/activities/${activityId}/streams?keys=heartrate,cadence,velocity_smooth,time,distance,altitude&key_by_type=true`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    if (streamRes.ok) {
-      streams = await streamRes.json();
-      await env.MAF_ACTIVITIES.put(streamCacheKey, JSON.stringify(streams));
-    } else {
-      console.log(`[webhook] Failed to fetch streams for ${activityId}: ${streamRes.status}`);
+    console.log(`[webhook] Failed to fetch streams for ${activityId}: ${streamRes.status}, falling back to cache`);
+    const cachedStream = await env.MAF_ACTIVITIES.get(streamCacheKey);
+    if (cachedStream) {
+      streams = JSON.parse(cachedStream);
     }
   }
 
@@ -239,19 +240,21 @@ async function processWebhookActivity(
     JSON.stringify(analysis)
   );
 
-  // 7. Update activity cache (add to list if not present)
+  // 7. Update activity cache (add or replace)
   const activitiesCacheKey = `${athleteId}:activities`;
   const cachedActivities = await env.MAF_ACTIVITIES.get(activitiesCacheKey);
   if (cachedActivities) {
     const activities: StravaActivity[] = JSON.parse(cachedActivities);
-    const exists = activities.some((a) => a.id === activity.id);
-    if (!exists) {
+    const idx = activities.findIndex((a) => a.id === activity.id);
+    if (idx >= 0) {
+      activities[idx] = activity;
+    } else {
       activities.unshift(activity);
-      activities.sort((a, b) =>
-        new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
-      );
-      await env.MAF_ACTIVITIES.put(activitiesCacheKey, JSON.stringify(activities));
     }
+    activities.sort((a, b) =>
+      new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+    );
+    await env.MAF_ACTIVITIES.put(activitiesCacheKey, JSON.stringify(activities));
   }
 
   // 8. Fetch weather data (if API key available and activity has location)
@@ -451,7 +454,7 @@ export default {
 
       const state = await loadGameState(env.MAF_GAME, athleteId);
       const userSettings = await loadSettings(env, athleteId);
-      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr } : undefined);
+      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr, timezone: userSettings.timezone } : undefined);
       return json({
         ...response,
         ...(env.DEV_MODE === 'true' ? { dev_mode: true } : {}),
@@ -822,7 +825,7 @@ export default {
       const finalState = await loadGameState(env.MAF_GAME, athleteId);
       finalState.backfill_complete = true;
       await saveGameState(env.MAF_GAME, athleteId, finalState);
-      const gameResponse = buildGameAPIResponse(finalState);
+      const gameResponse = buildGameAPIResponse(finalState, { maf_hr: settings.maf_hr, timezone: settings.timezone });
 
       return json({
         backfill: {
@@ -925,7 +928,7 @@ export default {
       }
 
       const finalState = await loadGameState(env.MAF_GAME, athleteId);
-      const gameResponse = buildGameAPIResponse(finalState);
+      const gameResponse = buildGameAPIResponse(finalState, { maf_hr: settings.maf_hr, timezone: settings.timezone });
 
       return json({
         rebadge: {
@@ -1066,8 +1069,157 @@ export default {
       await saveGameState(env.MAF_GAME, athleteId, state);
 
       const userSettings = await loadSettings(env, athleteId);
-      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr } : undefined);
+      const response = buildGameAPIResponse(state, userSettings ? { maf_hr: userSettings.maf_hr, timezone: userSettings.timezone } : undefined);
       return json({ stage: body.stage, game: response });
+    }
+
+    // --- Debug: Re-analyze all cached activities with corrected pace formula ---
+    if (path === '/api/debug/reanalyze-all' && request.method === 'POST' && env.DEV_MODE === 'true') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+
+      const settings = await loadSettings(env, athleteId);
+      if (!settings) return json({ error: 'No settings' }, 400);
+
+      const cached = await env.MAF_ACTIVITIES.get(`${athleteId}:activities`);
+      if (!cached) return json({ error: 'No cached activities' }, 400);
+
+      const activities: StravaActivity[] = JSON.parse(cached);
+      let reanalyzed = 0;
+      let failed = 0;
+      const sample: Record<string, any>[] = [];
+
+      for (const activity of activities) {
+        try {
+          const streamRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:stream:${activity.id}`);
+          const streams: StreamData | null = streamRaw ? JSON.parse(streamRaw) : null;
+          const analysis = analyzeActivity(activity, streams, settings);
+          await env.MAF_ACTIVITIES.put(`${athleteId}:analysis:${activity.id}`, JSON.stringify(analysis));
+          reanalyzed++;
+          if (sample.length < 3) {
+            sample.push({ id: activity.id, name: activity.name, avg_pace: analysis.avg_pace, maf_pace: analysis.maf_pace });
+          }
+        } catch (err) {
+          console.error(`[reanalyze] Failed for ${activity.id}:`, err);
+          failed++;
+        }
+      }
+
+      return json({ reanalyzed, failed, sample });
+    }
+
+    // --- Debug: Inspect a single cached analysis ---
+    if (path.match(/^\/api\/debug\/activity\/(\d+)$/) && request.method === 'GET' && env.DEV_MODE === 'true') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+      const activityId = path.split('/').pop()!;
+      const analysisRaw = await env.MAF_ACTIVITIES.get(`${athleteId}:analysis:${activityId}`);
+      if (!analysisRaw) return json({ error: 'No cached analysis' }, 404);
+      return json(JSON.parse(analysisRaw));
+    }
+
+    // --- Debug: Streak State ---
+    if (path === '/api/debug/streak' && request.method === 'GET' && env.DEV_MODE === 'true') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+      const state = await loadGameState(env.MAF_GAME, athleteId);
+      const userSettings = await loadSettings(env, athleteId);
+      const tz = userSettings?.timezone || 'America/New_York';
+      const now = new Date();
+      const currentWeek = getISOWeekInTimezone(now, tz);
+      const currentWeekRecord = state.weekly_history.find((w: WeeklyRecord) => w.week === currentWeek);
+      return json({
+        current_weeks: state.streak_current_weeks || 0,
+        last_qualified_week: state.streak?.last_qualified_week || state.streak_last_qualified_week || null,
+        current_iso_week: currentWeek,
+        timezone: tz,
+        this_week_zone_minutes: currentWeekRecord?.zone_minutes || 0,
+        weekly_target: state.weekly_target_zone_minutes,
+        frozen: state.streak?.frozen || false,
+        weekly_history: (state.weekly_history || []).slice(-8),
+      });
+    }
+
+    // --- Debug: Recalculate Streak from weekly_history ---
+    if (path === '/api/debug/recalculate-streak' && request.method === 'POST' && env.DEV_MODE === 'true') {
+      const auth = await requireAuth(request, env);
+      if (auth instanceof Response) return auth;
+      const athleteId = auth;
+      const state = await loadGameState(env.MAF_GAME, athleteId);
+      const userSettings = await loadSettings(env, athleteId);
+      const tz = userSettings?.timezone || 'America/New_York';
+
+      // Sort weekly history chronologically
+      const sorted = [...(state.weekly_history || [])].sort((a, b) => a.week.localeCompare(b.week));
+
+      const before = {
+        current_weeks: state.streak_current_weeks,
+        longest: state.streak_longest,
+        last_qualified_week: state.streak_last_qualified_week,
+      };
+
+      // Walk weeks and recompute streak
+      let currentStreak = 0;
+      let longestStreak = 0;
+      let lastQualifiedWeek: string | null = null;
+      let prevWeek: string | null = null;
+
+      for (const record of sorted) {
+        // Check for gap: if previous qualified week exists, check continuity
+        if (prevWeek && record.week !== getNextISOWeek(prevWeek)) {
+          // Gap detected — reset streak
+          currentStreak = 0;
+        }
+
+        if (record.target_met) {
+          currentStreak += 1;
+          if (currentStreak > longestStreak) longestStreak = currentStreak;
+          lastQualifiedWeek = record.week;
+          prevWeek = record.week;
+        } else if (record.runs > 0) {
+          // Ran but didn't hit target — freeze (don't increment, don't reset)
+          prevWeek = record.week;
+        } else {
+          // No runs — reset
+          currentStreak = 0;
+          prevWeek = record.week;
+        }
+      }
+
+      // Don't count the current week (it's in progress)
+      const now = new Date();
+      const currentISOWeek = getISOWeekInTimezone(now, tz);
+      const currentWeekRecord = sorted.find((w) => w.week === currentISOWeek);
+      if (currentWeekRecord && currentWeekRecord.target_met && lastQualifiedWeek === currentISOWeek) {
+        // Current week shouldn't count toward streak yet — it may still change
+        // But if it already met target, keep it counted
+      }
+
+      // Apply corrections
+      state.streak_current_weeks = currentStreak;
+      state.streak_longest = longestStreak;
+      state.streak_last_qualified_week = lastQualifiedWeek;
+      state.streak.current_weeks = currentStreak;
+      state.streak.longest_ever = longestStreak;
+      state.streak.last_qualified_week = lastQualifiedWeek;
+      state.streak.frozen = false;
+
+      await saveGameState(env.MAF_GAME, athleteId, state);
+
+      return json({
+        before,
+        after: {
+          current_weeks: currentStreak,
+          longest: longestStreak,
+          last_qualified_week: lastQualifiedWeek,
+        },
+        weeks_evaluated: sorted.length,
+        current_iso_week: currentISOWeek,
+        timezone: tz,
+      });
     }
 
     // --- OAuth: Redirect to Strava ---
@@ -1136,6 +1288,11 @@ export default {
         if (athleteName) existing.athlete_name = athleteName;
         if (firstname) existing.display_name = firstname;
         if (profile) existing.avatar_url = profile;
+        // Store IANA timezone from Strava (e.g., "(GMT-05:00) America/New_York" → "America/New_York")
+        if (data.athlete.timezone) {
+          const tzMatch = data.athlete.timezone.match(/\)\s*(.+)/);
+          existing.timezone = tzMatch ? tzMatch[1] : data.athlete.timezone;
+        }
         await env.MAF_SETTINGS.put(`${athleteId}:settings`, JSON.stringify(existing));
       }
 
@@ -1167,18 +1324,28 @@ export default {
 
     // --- Auth: Logout ---
     if (path === '/api/auth/logout') {
-      const sessionId = getAthleteIdFromCookie(request);
-      if (sessionId) {
-        await env.MAF_TOKENS.delete(`session:${sessionId}`);
+      try {
+        const sessionId = getAthleteIdFromCookie(request);
+        if (sessionId) {
+          await env.MAF_TOKENS.delete(`session:${sessionId}`);
+        }
+        const host = request.headers.get('Host') || 'maf-dev.marliin.com';
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        const origin = `${protocol}://${host}`;
+        const cookie = host.includes('localhost')
+          ? 'maf_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax'
+          : 'maf_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax';
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: `${origin}?returning=true`,
+            'Set-Cookie': cookie,
+          },
+        });
+      } catch (err) {
+        console.error('Disconnect handler error:', err);
+        return new Response('Logout failed', { status: 500 });
       }
-      const origin = new URL(request.url).origin;
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: origin,
-          'Set-Cookie': 'maf_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-        },
-      });
     }
 
     // --- Fetch Activities ---

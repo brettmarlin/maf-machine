@@ -42,7 +42,7 @@ interface GameSummary {
   lifetime_total_runs: number
 }
 
-export type AppState = 'landing' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
+export type AppState = 'landing' | 'connect_strava' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
 
 const DEFAULT_SETTINGS: Settings = {
   configured: false,
@@ -55,20 +55,29 @@ function getAppState(
   settings: Settings | null,
   gameSummary: GameSummary | null,
 ): AppState {
-  if (!authenticated) return 'landing'
+  // 1. Returning user flag — check first, before any other logic
+  const isReturning = new URLSearchParams(window.location.search).get('returning') === 'true'
+  if (isReturning) {
+    window.history.replaceState({}, '', window.location.pathname)
+    return 'connect_strava'
+  }
 
-  // Only show onboarding for truly new users: no settings AND no prior activity
-  const isNewUser = !settings?.age
-    && (gameSummary?.lifetime_total_runs ?? 0) === 0
-    && !gameSummary?.badges_earned?.includes('committed')
-  if (isNewUser) return 'setup'
+  // 2. Not authenticated
+  if (!authenticated) {
+    // Has existing settings → returning user, show reconnect (not onboarding)
+    if (settings?.age) return 'connect_strava'
+    return 'landing'
+  }
 
-  // Returning user who reconnected but lost settings → skip straight to dashboard
-  // (dashboard/settings will prompt them to re-enter age if needed)
-  const backfillDone = gameSummary?.backfill_complete ?? true
-  if (!backfillDone && settings?.training_start_date) return 'backfill'
+  // 3. Authenticated with settings → dashboard
+  if (settings?.age) {
+    const backfillDone = gameSummary?.backfill_complete ?? true
+    if (!backfillDone && settings?.training_start_date) return 'backfill'
+    return 'dashboard'
+  }
 
-  return 'dashboard'
+  // 4. Authenticated but no settings — truly new user → onboarding
+  return 'setup'
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -228,6 +237,38 @@ export default function App() {
   // Landing — not authenticated
   if (appState === 'landing') {
     return <LandingPage />
+  }
+
+  // Returning user — reconnect Strava (no onboarding, no celebration)
+  if (appState === 'connect_strava') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6">
+        <div className="max-w-md text-center space-y-8">
+          <img
+            src={`${BASE_PATH}/maf-machine-logo.svg`}
+            alt="MAF Machine"
+            style={{ height: 32, width: 'auto' }}
+            className="mx-auto"
+          />
+          <p className="text-gray-400 text-base">
+            Welcome back — reconnect Strava to continue.
+          </p>
+          <a
+            href={`${BASE_PATH}/api/auth/strava`}
+            className="inline-block hover:opacity-90 transition-opacity"
+            aria-label="Connect with Strava"
+          >
+            <img
+              src={`${BASE_PATH}/btn_strava_connectwith_orange.svg`}
+              alt="Connect with Strava"
+              width={193}
+              height={48}
+              className="h-12 w-auto"
+            />
+          </a>
+        </div>
+      </div>
+    )
   }
 
   // Setup — authenticated but no settings (age)

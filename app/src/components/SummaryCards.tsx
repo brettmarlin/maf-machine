@@ -181,7 +181,7 @@ export function SummaryCards({ summary, trends, units, mafHr }: Props) {
           <div>
             <p className="text-xs text-gray-500/70 font-semibold uppercase tracking-widest">
               MAF Pace
-              <InfoTooltip text="Pace while heart rate is below your ceiling — not your overall pace. The key metric that should get faster over months of MAF training." />
+              <InfoTooltip text="Average pace during below-ceiling seconds only — not your overall pace. This is the key metric that should get faster over months of MAF training." />
             </p>
             <span className={`text-[10px] sm:text-xs ${trendColor(summary.paceTrendDirection)}`}>
               {trendArrow(summary.paceTrendDirection, 'pace')} {trendLabel(summary.paceTrendDirection, 'pace')}
