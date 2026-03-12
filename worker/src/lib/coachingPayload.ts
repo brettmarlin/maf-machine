@@ -45,6 +45,8 @@ export interface ThisRunContext {
   pace_steadiness_score: number;
   elevation_gain: number;
   elevation_unit: string;
+  hr_recovery_rate_bpm_per_min: number | null;
+  hr_recovery_events: number;
   xp_earned: number;
   xp_breakdown: Record<string, number>;
   badges_earned: string[];
@@ -83,6 +85,8 @@ export interface TrendsContext {
   pace_improvement_pct: number | null;
   avg_below_ceiling_4wk: number | null;
   avg_cardiac_drift_4wk: number | null;
+  hr_recovery_rate_4wk_avg: number | null;
+  hr_recovery_trend: 'improving' | 'declining' | 'stable' | null;
   total_zone_minutes_lifetime: number;
   total_qualifying_runs: number;
   level: number;
@@ -194,6 +198,24 @@ function buildTrends(recentActivities: MAFActivity[], gameState: GameState, unit
     ? roundTo1(last4Weeks.reduce((sum, a) => sum + a.time_below_ceiling_pct, 0) / last4Weeks.length)
     : null;
 
+  // HR Recovery Rate — 4wk average and trend
+  const recoveryRuns4wk = last4Weeks.filter((a) => a.hr_recovery_rate_bpm_per_min !== null);
+  const recoveryRuns8wk = last8Weeks.filter((a) => a.hr_recovery_rate_bpm_per_min !== null);
+  const avg4wkRecovery = recoveryRuns4wk.length > 0
+    ? roundTo1(recoveryRuns4wk.reduce((sum, a) => sum + a.hr_recovery_rate_bpm_per_min!, 0) / recoveryRuns4wk.length)
+    : null;
+  const avg8wkRecovery = recoveryRuns8wk.length > 0
+    ? recoveryRuns8wk.reduce((sum, a) => sum + a.hr_recovery_rate_bpm_per_min!, 0) / recoveryRuns8wk.length
+    : null;
+
+  let hrRecoveryTrend: 'improving' | 'declining' | 'stable' | null = null;
+  if (avg4wkRecovery !== null && avg8wkRecovery !== null && avg8wkRecovery > 0) {
+    const change = ((avg4wkRecovery - avg8wkRecovery) / avg8wkRecovery) * 100;
+    if (change > 5) hrRecoveryTrend = 'improving';
+    else if (change < -5) hrRecoveryTrend = 'declining';
+    else hrRecoveryTrend = 'stable';
+  }
+
   const level = getLevelFromXP(gameState.xp_total);
 
   return {
@@ -202,6 +224,8 @@ function buildTrends(recentActivities: MAFActivity[], gameState: GameState, unit
     pace_improvement_pct: paceImprovement,
     avg_below_ceiling_4wk: avg4wkBelowCeiling,
     avg_cardiac_drift_4wk: avg4wkDrift,
+    hr_recovery_rate_4wk_avg: avg4wkRecovery,
+    hr_recovery_trend: hrRecoveryTrend,
     total_zone_minutes_lifetime: Math.round(
       recentActivities.reduce((sum, a) => sum + a.zone_minutes, 0)
     ),
@@ -272,6 +296,8 @@ export function buildPostRunPayload(
     pace_steadiness_score: Math.round(activity.pace_steadiness_score),
     elevation_gain: elevGain,
     elevation_unit: units === 'mi' ? 'ft' : 'm',
+    hr_recovery_rate_bpm_per_min: activity.hr_recovery_rate_bpm_per_min,
+    hr_recovery_events: activity.hr_recovery_events,
     xp_earned: xpEarned,
     xp_breakdown: xpBreakdown,
     badges_earned: badgesEarned,
