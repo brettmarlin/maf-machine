@@ -1284,6 +1284,24 @@ export default {
           return json({ error: 'Feedback not configured' }, 500);
         }
 
+        // Look up user's email and timezone from settings (best-effort)
+        let userEmail = body.email || '';
+        let userTimezone = '';
+        let athleteId = '';
+        try {
+          const resolvedId = await resolveSession(request, env);
+          if (resolvedId) {
+            athleteId = resolvedId;
+            const settingsRaw = await env.MAF_SETTINGS.get(`${resolvedId}:settings`);
+            if (settingsRaw) {
+              const settings = JSON.parse(settingsRaw);
+              if (!userEmail && settings.email) userEmail = settings.email;
+              if (settings.timezone) userTimezone = settings.timezone;
+            }
+          }
+        } catch {}
+
+
         const notionHeaders = {
           'Authorization': `Bearer ${env.NOTION_API_KEY}`,
           'Notion-Version': '2022-06-28',
@@ -1317,8 +1335,9 @@ export default {
               { object: 'block', type: 'heading_3', heading_3: { rich_text: [{ text: { content: 'Details' } }] } },
               { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Category: ${category}` } }] } },
               { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Message: ${message}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Email: ${body.email || 'N/A'}` } }] } },
-              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Strava ID: ${body.stravaId || 'N/A'}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Email: ${userEmail || 'N/A'}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Timezone: ${userTimezone || 'N/A'}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Strava ID: ${athleteId || body.stravaId || 'N/A'}` } }] } },
               { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Version: 2.0.0-beta` } }] } },
               { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Submitted: ${new Date().toISOString()}` } }] } },
             ],
