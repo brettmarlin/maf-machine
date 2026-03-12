@@ -1284,55 +1284,37 @@ export default {
           'Content-Type': 'application/json',
         };
 
-        // Schema setup on first use
-        const schemaFlag = await env.MAF_SETTINGS.get('notion_schema_initialized');
-        if (!schemaFlag) {
-          await fetch(`https://api.notion.com/v1/databases/${env.NOTION_FEEDBACK_DB_ID}`, {
-            method: 'PATCH',
-            headers: notionHeaders,
-            body: JSON.stringify({
-              properties: {
-                'Title': { title: {} },
-                'Category': { select: { options: [
-                  { name: 'Bug', color: 'red' },
-                  { name: 'Feature Request', color: 'blue' },
-                  { name: 'Confusion', color: 'yellow' },
-                  { name: 'Praise', color: 'green' },
-                  { name: 'Other', color: 'gray' },
-                ]}},
-                'Message': { rich_text: {} },
-                'Email': { email: {} },
-                'Strava ID': { rich_text: {} },
-                'App Version': { rich_text: {} },
-                'Status': { select: { options: [
-                  { name: 'New', color: 'blue' },
-                  { name: 'Reviewing', color: 'yellow' },
-                  { name: 'Done', color: 'green' },
-                  { name: "Won't Fix", color: 'gray' },
-                ]}},
-                'Submitted At': { date: {} },
-              },
-            }),
-          });
-          await env.MAF_SETTINGS.put('notion_schema_initialized', 'true');
+        // Discover the database's title property name
+        const dbRes = await fetch(`https://api.notion.com/v1/databases/${env.NOTION_FEEDBACK_DB_ID}`, {
+          method: 'GET',
+          headers: notionHeaders,
+        });
+        if (!dbRes.ok) {
+          console.error('Notion DB read error:', await dbRes.text());
+          return json({ error: 'Failed to submit' }, 500);
         }
+        const dbData = await dbRes.json() as { properties: Record<string, { type: string }> };
+        const titleProp = Object.entries(dbData.properties).find(([, v]) => v.type === 'title');
+        const titleKey = titleProp ? titleProp[0] : 'Name';
 
-        // Create page in Notion
+        // Create page in Notion with title + body content
         const res = await fetch('https://api.notion.com/v1/pages', {
           method: 'POST',
           headers: notionHeaders,
           body: JSON.stringify({
             parent: { database_id: env.NOTION_FEEDBACK_DB_ID },
             properties: {
-              'Title': { title: [{ text: { content: message.slice(0, 80) } }] },
-              'Category': { select: { name: category } },
-              'Message': { rich_text: [{ text: { content: message } }] },
-              'Email': body.email ? { email: body.email } : { email: null },
-              'Strava ID': { rich_text: [{ text: { content: body.stravaId || '' } }] },
-              'App Version': { rich_text: [{ text: { content: '2.0.0-beta' } }] },
-              'Status': { select: { name: 'New' } },
-              'Submitted At': { date: { start: new Date().toISOString() } },
+              [titleKey]: { title: [{ text: { content: `[${category}] ${message.slice(0, 70)}` } }] },
             },
+            children: [
+              { object: 'block', type: 'heading_3', heading_3: { rich_text: [{ text: { content: 'Details' } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Category: ${category}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Message: ${message}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Email: ${body.email || 'N/A'}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Strava ID: ${body.stravaId || 'N/A'}` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Version: 2.0.0-beta` } }] } },
+              { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: `Submitted: ${new Date().toISOString()}` } }] } },
+            ],
           }),
         });
 
