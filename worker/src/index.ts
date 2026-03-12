@@ -73,14 +73,19 @@ function getAthleteIdFromCookie(request: Request): string | null {
 }
 
 async function resolveSession(request: Request, env: Env): Promise<string | null> {
-  // Dev mode: bypass auth
+  // Try real session first
+  const sessionId = getAthleteIdFromCookie(request);
+  if (sessionId) {
+    const athleteId = await env.MAF_TOKENS.get(`session:${sessionId}`);
+    if (athleteId) return athleteId;
+  }
+
+  // Dev mode: fallback to dev athlete only if no valid session
   if (env.DEV_MODE === 'true') {
     return env.DEV_ATHLETE_ID || null;
   }
 
-  const sessionId = getAthleteIdFromCookie(request);
-  if (!sessionId) return null;
-  return await env.MAF_TOKENS.get(`session:${sessionId}`);
+  return null;
 }
 
 async function getValidToken(athleteId: string, env: Env): Promise<string | null> {
@@ -1291,7 +1296,8 @@ export default {
           headers: notionHeaders,
         });
         if (!dbRes.ok) {
-          console.error('Notion DB read error:', await dbRes.text());
+          const dbErr = await dbRes.text();
+          console.error('Notion DB read error:', dbErr);
           return json({ error: 'Failed to submit' }, 500);
         }
         const dbData = await dbRes.json() as { properties: Record<string, { type: string }> };
@@ -1320,7 +1326,8 @@ export default {
         });
 
         if (!res.ok) {
-          console.error('Notion error:', await res.text());
+          const pageErr = await res.text();
+          console.error('Notion page error:', pageErr);
           return json({ error: 'Failed to submit' }, 500);
         }
 
@@ -1333,8 +1340,7 @@ export default {
 
     // --- OAuth: Redirect to Strava ---
     if (path === '/api/auth/strava') {
-      const baseUrl = env.REDIRECT_URI || getBaseUrl(request);
-      const redirectUri = `${baseUrl}/api/auth/callback`;
+      const redirectUri = `${env.REDIRECT_URI ?? 'https://mafmachine.com'}/api/auth/callback`;
       const stravaAuthUrl = new URL('https://www.strava.com/oauth/authorize');
       stravaAuthUrl.searchParams.set('client_id', env.STRAVA_CLIENT_ID);
       stravaAuthUrl.searchParams.set('response_type', 'code');
@@ -1354,7 +1360,8 @@ export default {
         return new Response(`OAuth error: ${error || 'no code received'}`, { status: 400 });
       }
 
-      const baseUrl = env.REDIRECT_URI || getBaseUrl(request);
+      const baseUrl = env.REDIRECT_URI ?? 'https://mafmachine.com';
+      const redirectUri = `${baseUrl}/api/auth/callback`;
       const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1362,6 +1369,7 @@ export default {
           client_id: env.STRAVA_CLIENT_ID,
           client_secret: env.STRAVA_CLIENT_SECRET,
           code,
+          redirect_uri: redirectUri,
           grant_type: 'authorization_code',
         }),
       });
