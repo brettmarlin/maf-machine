@@ -6,10 +6,13 @@ workers_dev = false
 [triggers]
 crons = ["0 3 * * *"]
 
-# Route on maf.marliin.com subdomain
+# Route on mafmachine.com
 routes = [
-  { pattern = "maf.marliin.com/*", zone_name = "marliin.com" }
+  { pattern = "mafmachine.com/*", zone_name = "mafmachine.com" }
 ]
+
+[vars]
+REDIRECT_URI = "https://mafmachine.com"
 
 # Static assets from Vite build
 [assets]
@@ -32,3 +35,7 @@ preview_id = "6b88824b06b548899d517d70739faa23"
 binding = "MAF_SETTINGS"
 id = "08b7ce8af969418595856f61fb42c6c6"
 preview_id = "d0d1c96a7b834c0490728d705f57c533"
+
+[[kv_namespaces]]
+binding = "MAF_GAME"
+id = "da4c031c54784e1d878b087294a76421"

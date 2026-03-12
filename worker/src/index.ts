@@ -30,6 +30,7 @@ export interface Env {
   BREVO_LIST_ID?: string;
   NOTION_FEEDBACK_DB_ID?: string;
   NOTION_API_KEY?: string;
+  REDIRECT_URI?: string;
 }
 
 interface StravaTokenResponse {
@@ -1332,7 +1333,7 @@ export default {
 
     // --- OAuth: Redirect to Strava ---
     if (path === '/api/auth/strava') {
-      const baseUrl = getBaseUrl(request);
+      const baseUrl = env.REDIRECT_URI || getBaseUrl(request);
       const redirectUri = `${baseUrl}/api/auth/callback`;
       const stravaAuthUrl = new URL('https://www.strava.com/oauth/authorize');
       stravaAuthUrl.searchParams.set('client_id', env.STRAVA_CLIENT_ID);
@@ -1353,7 +1354,7 @@ export default {
         return new Response(`OAuth error: ${error || 'no code received'}`, { status: 400 });
       }
 
-      const baseUrl = getBaseUrl(request);
+      const baseUrl = env.REDIRECT_URI || getBaseUrl(request);
       const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
