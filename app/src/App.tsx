@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { LandingPage } from './components/LandingPage'
 import { OnboardingSetup } from './components/OnboardingSetup'
 import { BadgeCelebration } from './components/BadgeCelebration'
 import { TrainingStartDate } from './components/TrainingStartDate'
@@ -43,7 +42,7 @@ interface GameSummary {
   lifetime_total_runs: number
 }
 
-export type AppState = 'landing' | 'connect_strava' | 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
+export type AppState = 'setup' | 'setup_celebration' | 'start_date' | 'backfill' | 'email_capture' | 'dashboard' | 'privacy' | 'support'
 
 const DEFAULT_SETTINGS: Settings = {
   configured: false,
@@ -55,29 +54,20 @@ function getAppState(
   authenticated: boolean,
   settings: Settings | null,
   gameSummary: GameSummary | null,
-): AppState {
-  // 1. Returning user flag — check first, before any other logic
-  const isReturning = new URLSearchParams(window.location.search).get('returning') === 'true'
-  if (isReturning) {
-    window.history.replaceState({}, '', window.location.pathname)
-    return 'connect_strava'
-  }
-
-  // 2. Not authenticated
+): AppState | 'redirect' {
+  // Not authenticated → redirect to landing page
   if (!authenticated) {
-    // Has existing settings → returning user, show reconnect (not onboarding)
-    if (settings?.age) return 'connect_strava'
-    return 'landing'
+    return 'redirect'
   }
 
-  // 3. Authenticated with settings → dashboard
+  // Authenticated with settings → dashboard
   if (settings?.age) {
     const backfillDone = gameSummary?.backfill_complete ?? true
     if (!backfillDone && settings?.training_start_date) return 'backfill'
     return 'dashboard'
   }
 
-  // 4. Authenticated but no settings — truly new user → onboarding
+  // Authenticated but no settings — new user → onboarding
   return 'setup'
 }
 
@@ -235,41 +225,16 @@ export default function App() {
     gameSummary,
   )
 
+  // Not authenticated → redirect to landing page
+  if (appState === 'redirect') {
+    window.location.href = 'https://www.mafmachine.com'
+    return null
+  }
+
   // Resolve page content
   let content: React.ReactNode = null
 
-  if (appState === 'landing') {
-    content = <LandingPage />
-  } else if (appState === 'connect_strava') {
-    content = (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6">
-        <div className="max-w-md text-center space-y-8">
-          <img
-            src={`${BASE_PATH}/maf-machine-logo.svg`}
-            alt="MAF Machine"
-            style={{ height: 32, width: 'auto' }}
-            className="mx-auto"
-          />
-          <p className="text-gray-400 text-base">
-            Welcome back — reconnect Strava to continue.
-          </p>
-          <a
-            href={`${BASE_PATH}/api/auth/strava`}
-            className="inline-block hover:opacity-90 transition-opacity"
-            aria-label="Connect with Strava"
-          >
-            <img
-              src={`${BASE_PATH}/btn_strava_connectwith_orange.svg`}
-              alt="Connect with Strava"
-              width={193}
-              height={48}
-              className="h-12 w-auto"
-            />
-          </a>
-        </div>
-      </div>
-    )
-  } else if (appState === 'setup') {
+  if (appState === 'setup') {
     content = (
       <OnboardingSetup
         athleteName={settings.athlete_name}
